@@ -98,5 +98,6 @@ actual object Platform {
         File(out).parentFile?.mkdirs()
         return data.writeToFile(out, atomically = true)
     }
-    actual fun log(msg: String) = platform.Foundation.NSLog("osmotr: %@", msg)
+    // Текст — целиком, без подстановок: Kotlin-строку в «%@» NSLog не передать (сбой SIGSEGV).
+    actual fun log(msg: String) = platform.Foundation.NSLog("osmotr: " + msg.replace("%", "%%"))
 }
