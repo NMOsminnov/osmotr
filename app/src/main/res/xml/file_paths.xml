@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!-- Архивы для «Поделиться» и снимки из папки «Осмотры». -->
+    <cache-path name="share" path="share/" />
+    <external-path name="osmotr" path="Осмотры/" />
+</paths>
