@@ -16,8 +16,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.UnfoldLess
-import androidx.compose.material.icons.filled.UnfoldMore
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -76,7 +74,7 @@ fun TreeScreen(current: File, open: (File) -> Unit, close: () -> Unit) {
                 title = { Text("Структура") },
                 actions = {
                     IconButton(onClick = { allOpen = !allOpen }) {
-                        Icon(if (allOpen) Icons.Default.UnfoldLess else Icons.Default.UnfoldMore, if (allOpen) "Свернуть всё" else "Раскрыть всё")
+                        Icon(if (allOpen) AppIcons.UnfoldLess else AppIcons.UnfoldMore, if (allOpen) "Свернуть всё" else "Раскрыть всё")
                     }
                 },
             )

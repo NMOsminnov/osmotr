@@ -40,10 +40,8 @@ import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Contacts
 import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.Person
-import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.Phone
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -107,11 +105,11 @@ fun ContactsScreen(dir: File, close: () -> Unit) {
                 navigationIcon = { IconButton(onClick = close) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Назад") } },
                 title = { Column { Text("Контакты"); Text(Store.title(dir), style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1) } },
-                actions = { IconButton(onClick = { runCatching { pick() } }) { Icon(Icons.Default.Contacts, "Из телефонной книги") } },
+                actions = { IconButton(onClick = { runCatching { pick() } }) { Icon(AppIcons.Contacts, "Из телефонной книги") } },
             )
         },
         floatingActionButton = {
-            ExtendedFloatingActionButton(onClick = { editing = -1 to Store.Contact() }, icon = { Icon(Icons.Default.PersonAdd, null) },
+            ExtendedFloatingActionButton(onClick = { editing = -1 to Store.Contact() }, icon = { Icon(AppIcons.PersonAdd, null) },
                 text = { Text("Добавить") }, containerColor = MaterialTheme.colorScheme.primary, contentColor = Color.White)
         },
     ) { inner ->

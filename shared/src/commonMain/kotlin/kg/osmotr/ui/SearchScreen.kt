@@ -26,10 +26,7 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.Notes
-import androidx.compose.material.icons.filled.Checklist
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -117,7 +114,7 @@ private fun Result(hit: Search.Hit, query: String, onClick: () -> Unit) {
     val e = hit.entry
     Row(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 10.dp),
         horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.CenterVertically) {
-        Icon(Icons.Default.Folder, null, Modifier.size(28.dp), tint = MaterialTheme.colorScheme.secondary)
+        Icon(AppIcons.Folder, null, Modifier.size(28.dp), tint = MaterialTheme.colorScheme.secondary)
         Column(Modifier.weight(1f)) {
             Text(marked(e.name, query), style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
             Text(listOf(e.where, plural(e.photos, "фото", "фото", "фото")).joinToString(" · "),
@@ -125,7 +122,7 @@ private fun Result(hit: Search.Hit, query: String, onClick: () -> Unit) {
                 overflow = TextOverflow.StartEllipsis)
             hit.noteLine?.let { line ->
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Icon(Icons.AutoMirrored.Filled.Notes, null, Modifier.size(14.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Icon(AppIcons.Notes, null, Modifier.size(14.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                     Text(marked(line, query), style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
@@ -144,7 +141,7 @@ private fun ItemResult(e: Search.ItemEntry, query: String, onClick: () -> Unit) 
     val i = e.item
     Row(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 10.dp),
         horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.CenterVertically) {
-        Icon(Icons.Default.Checklist, null, Modifier.size(28.dp), tint = MaterialTheme.colorScheme.primary)
+        Icon(AppIcons.Checklist, null, Modifier.size(28.dp), tint = MaterialTheme.colorScheme.primary)
         Column(Modifier.weight(1f)) {
             Text(marked("${i.inventory}  ·  № ${i.number}" + if (i.priority.isNotEmpty()) "  ·  П${i.priority}" else "", query),
                 style = MaterialTheme.typography.titleSmall, maxLines = 1)

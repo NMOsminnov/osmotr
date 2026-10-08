@@ -18,7 +18,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.CreateNewFolder
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -105,7 +104,7 @@ fun FolderPicker(title: String, start: File, action: String, onPick: (File) -> U
                     modifier = Modifier.fillMaxWidth().heightIn(max = 420.dp))
                 Row(Modifier.fillMaxWidth().clickable { creating = true }.padding(vertical = 10.dp, horizontal = 6.dp),
                     verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Icon(Icons.Default.CreateNewFolder, null, tint = MaterialTheme.colorScheme.primary)
+                    Icon(AppIcons.CreateNewFolder, null, tint = MaterialTheme.colorScheme.primary)
                     Text("Новая папка", color = MaterialTheme.colorScheme.primary, maxLines = 1)
                 }
             }

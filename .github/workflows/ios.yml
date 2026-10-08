@@ -3,8 +3,16 @@
 name: iPhone
 
 on:
+  # IPA (выпускная сборка — самая долгая) — только по кнопке или метке версии «v…»;
+  # на каждую отправку — тесты, симулятор и снимки экрана.
   workflow_dispatch:
+    inputs:
+      ipa:
+        description: Собрать IPA для SideStore
+        type: boolean
+        default: true
   push:
+    tags: ["v*"]
     branches: [main]
     paths: ["shared/**", "iosApp/**", ".github/workflows/ios.yml", "gradle/**", "*.gradle.kts", "gradle.properties"]
 
@@ -32,6 +40,10 @@ jobs:
         with:
           path: ~/.konan
           key: konan-${{ runner.os }}-${{ hashFiles('gradle/libs.versions.toml') }}
+      - name: Память сборке (облачный Mac — 7 ГБ; Kotlin/Native в выпускной сборке прожорлив)
+        run: |
+          sed -i '' 's/^org.gradle.jvmargs=.*/org.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=1g -XX:+UseParallelGC -Dfile.encoding=UTF-8/' gradle.properties
+          echo "kotlin.native.jvmArgs=-Xmx4g" >> gradle.properties
       - name: Тесты общего кода (описи, поиск)
         run: ./gradlew :shared:jvmTest --no-configuration-cache
       - name: Проект Xcode
@@ -42,7 +54,9 @@ jobs:
         run: |
           xcodebuild -project iosApp/Osmotr.xcodeproj -scheme Osmotr -configuration Debug \
             -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
-            -derivedDataPath build/sim ARCHS=arm64 ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO build | tail -40
+            -derivedDataPath build/sim ARCHS=arm64 ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO build > xcodebuild-sim.log 2>&1 \
+            || { grep -E "error|e: |What went wrong|FAILED" -A3 xcodebuild-sim.log | head -80; exit 1; }
+          grep -E "BUILD SUCCEEDED|BUILD SUCCESSFUL in" xcodebuild-sim.log
       - name: Запуск на симуляторе и снимки экрана
         run: |
           mkdir -p shots
@@ -56,10 +70,12 @@ jobs:
           xcrun simctl io "$DEVICE" screenshot shots/01-опись.png
           xcrun simctl spawn "$DEVICE" log show --last 2m --predicate 'process == "Osmotr"' --style compact > shots/log.txt || true
       - name: IPA без подписи (для SideStore)
+        if: github.event_name == 'workflow_dispatch' && inputs.ipa || startsWith(github.ref, 'refs/tags/v')
         run: |
           xcodebuild -project iosApp/Osmotr.xcodeproj -scheme Osmotr -configuration Release \
             -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build/dev \
-            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build | tail -20
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build > xcodebuild-ipa.log 2>&1 \
+            || { grep -E "error|e: |What went wrong|FAILED|OutOfMemory|Killed" -A3 xcodebuild-ipa.log | head -80; exit 1; }
           APP=build/dev/Build/Products/Release-iphoneos/Osmotr.app
           mkdir -p ipa/Payload && cp -R "$APP" ipa/Payload/
           (cd ipa && zip -qry ../Osmotr.ipa Payload)
@@ -71,3 +87,4 @@ jobs:
           path: |
             shots/
             Osmotr.ipa
+            xcodebuild-*.log

@@ -35,13 +35,10 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
-import androidx.compose.material.icons.automirrored.filled.Notes
 import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Person
-import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -261,7 +258,7 @@ fun FolderTree(
                             if (expanded) Icons.Default.KeyboardArrowDown else Icons.AutoMirrored.Filled.KeyboardArrowRight,
                             if (expanded) "Свернуть" else "Раскрыть", tint = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
-                    Icon(when { picked -> Icons.Default.CheckCircle; r.dir == Store.root -> Icons.Default.Home; else -> Icons.Default.Folder },
+                    Icon(when { picked -> Icons.Default.CheckCircle; r.dir == Store.root -> Icons.Default.Home; else -> AppIcons.Folder },
                         null, Modifier.size(20.dp),
                         tint = if (picked || on) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondary)
                     Text(
@@ -270,13 +267,13 @@ fun FolderTree(
                         fontWeight = if (on || picked) FontWeight.SemiBold else FontWeight.Normal,
                     )
                     val dim = MaterialTheme.colorScheme.onSurfaceVariant
-                    if (r.dir in t.notes) Icon(Icons.AutoMirrored.Filled.Notes, "Есть комментарий", Modifier.padding(end = 6.dp).size(16.dp), tint = dim)
+                    if (r.dir in t.notes) Icon(AppIcons.Notes, "Есть комментарий", Modifier.padding(end = 6.dp).size(16.dp), tint = dim)
                     if (r.dir in t.contacts) Icon(Icons.Default.Person, "Есть контакты", Modifier.padding(end = 8.dp).size(16.dp), tint = dim)
                     // Сколько внутри папок и снимков; пусто — приглушено: сразу видно, где не снимали.
                     val nf = t.folders[r.dir] ?: 0
                     val np = t.photos[r.dir] ?: 0
-                    if (nf > 0) Count(Icons.Default.Folder, nf, "папок внутри")
-                    if (np > 0) Count(Icons.Default.PhotoLibrary, np, "снимков внутри")
+                    if (nf > 0) Count(AppIcons.Folder, nf, "папок внутри")
+                    if (np > 0) Count(AppIcons.PhotoLibrary, np, "снимков внутри")
                     else Text("пусто", style = MaterialTheme.typography.labelMedium, color = dim.copy(alpha = 0.5f))
                 }
             }
@@ -303,7 +300,7 @@ fun FolderTree(
                 .shadow(8.dp, RoundedCornerShape(12.dp)).clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.primary)
                 .padding(horizontal = 14.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Icon(Icons.Default.Folder, null, tint = Color.White)
+                Icon(AppIcons.Folder, null, tint = Color.White)
                 val what = if (carried.size == 1) carried.single().name else plural(carried.size, "папка", "папки", "папок")
                 Text(what + (target?.let { "  →  " + (if (it == Store.root) "Осмотры" else it.name) } ?: ""),
                     color = Color.White, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)

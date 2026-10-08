@@ -35,17 +35,11 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.CheckBox
-import androidx.compose.material.icons.filled.CheckBoxOutlineBlank
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.CreateNewFolder
-import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.RadioButtonUnchecked
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Share
-import androidx.compose.material.icons.filled.UploadFile
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -251,12 +245,12 @@ fun InventoryScreen(obj: File, into: File? = null, openFolder: (File) -> Unit, f
                     // Выгрузка этой описи — отчёт, всё архивом, новое с прошлой выгрузки, за сегодня.
                     if (!d?.parsed.isNullOrEmpty()) IconButton(onClick = { exporting = true }) { Icon(Icons.Default.Share, "Выгрузить опись") }
                     // Папки этой описи — как раньше в «Осмотрах».
-                    IconButton(onClick = { folders(obj) }) { Icon(Icons.Default.Folder, "Папки описи") }
+                    IconButton(onClick = { folders(obj) }) { Icon(AppIcons.Folder, "Папки описи") }
                     Box {
                         IconButton(onClick = { menu = true }) { Icon(Icons.Default.MoreVert, "Ещё") }
                         DropdownMenu(menu, { menu = false }) {
                             DropdownMenuItem({ Text(if (d?.parsed.isNullOrEmpty()) "Загрузить опись" else "Заменить файл описи") },
-                                leadingIcon = { Icon(Icons.Default.UploadFile, null) }, onClick = { menu = false; load() })
+                                leadingIcon = { Icon(AppIcons.UploadFile, null) }, onClick = { menu = false; load() })
                         }
                     }
                 },
@@ -271,7 +265,7 @@ fun InventoryScreen(obj: File, into: File? = null, openFolder: (File) -> Unit, f
                         openFolder(dir)
                     }
                 },
-                icon = { Icon(Icons.Default.CreateNewFolder, null) }, text = { Text("В одну папку (${selected.size})") },
+                icon = { Icon(AppIcons.CreateNewFolder, null) }, text = { Text("В одну папку (${selected.size})") },
                 containerColor = MaterialTheme.colorScheme.primary, contentColor = Color.White,
             )
         },
@@ -284,14 +278,14 @@ fun InventoryScreen(obj: File, into: File? = null, openFolder: (File) -> Unit, f
                     Text("В файле не нашли список предметов", style = MaterialTheme.typography.titleMedium)
                     Text("Нужна таблица с инвентарными номерами и наименованиями.", Modifier.padding(top = 8.dp, bottom = 20.dp),
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Button(onClick = ::load) { Icon(Icons.Default.UploadFile, null); Text("  Заменить файл") }
+                    Button(onClick = ::load) { Icon(AppIcons.UploadFile, null); Text("  Заменить файл") }
                 }
                 d.parsed.isEmpty() -> Column(Modifier.fillMaxSize().padding(32.dp), verticalArrangement = Arrangement.Center,
                     horizontalAlignment = Alignment.CenterHorizontally) {
                     Text("Описи нет", style = MaterialTheme.typography.titleMedium)
                     Text("Excel (.xlsx) со списком: инвентарник, наименование, стоимость, приоритет.",
                         Modifier.padding(top = 8.dp, bottom = 20.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Button(onClick = ::load) { Icon(Icons.Default.UploadFile, null); Text("  Загрузить опись") }
+                    Button(onClick = ::load) { Icon(AppIcons.UploadFile, null); Text("  Загрузить опись") }
                 }
                 else -> {
                     // Поиск — первым: номер с бирки набирается сразу.
@@ -335,7 +329,7 @@ fun InventoryScreen(obj: File, into: File? = null, openFolder: (File) -> Unit, f
                             Column(Modifier.fillMaxWidth().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                                 Text("В описи нет «${v.query.trim()}»", style = MaterialTheme.typography.titleMedium)
                                 Button(onClick = { newFolder = v.query.trim() }, Modifier.padding(top = 16.dp)) {
-                                    Icon(Icons.Default.CreateNewFolder, null); Text("  Создать папку")
+                                    Icon(AppIcons.CreateNewFolder, null); Text("  Создать папку")
                                 }
                             }
                         }
@@ -363,13 +357,13 @@ fun InventoryScreen(obj: File, into: File? = null, openFolder: (File) -> Unit, f
                                 verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                                 // Осмотрено — зелёная отметка с числом снимков; нет — пустой кружок.
                                 Box(Modifier.size(34.dp), contentAlignment = Alignment.Center) {
-                                    if (target != null) Icon(if (here) Icons.Default.CheckBox else Icons.Default.CheckBoxOutlineBlank,
+                                    if (target != null) Icon(if (here) AppIcons.CheckBox else AppIcons.CheckBoxOutlineBlank,
                                         if (here) "В этой папке" else "Не в этой папке",
                                         tint = if (here) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
                                     else if (n > 0) {
                                         Icon(Icons.Default.CheckCircle, "Осмотрено", tint = Color(0xFF3FB950), modifier = Modifier.size(26.dp))
                                         Text("$n", Modifier.align(Alignment.BottomEnd), style = MaterialTheme.typography.labelSmall, color = Color(0xFF3FB950))
-                                    } else Icon(Icons.Default.RadioButtonUnchecked, "Не осмотрено", tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f))
+                                    } else Icon(AppIcons.RadioButtonUnchecked, "Не осмотрено", tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f))
                                 }
                                 Column(Modifier.weight(1f)) {
                                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -393,7 +387,7 @@ fun InventoryScreen(obj: File, into: File? = null, openFolder: (File) -> Unit, f
                         }
                         if (target == null && v.query.isNotBlank() && shown.isNotEmpty()) item(key = "other") {
                             TextButton(onClick = { newFolder = v.query.trim() }, Modifier.fillMaxWidth().padding(8.dp)) {
-                                Icon(Icons.Default.CreateNewFolder, null); Text("  Нет нужного? Не найдено — создать папку")
+                                Icon(AppIcons.CreateNewFolder, null); Text("  Нет нужного? Не найдено — создать папку")
                             }
                         }
                     }

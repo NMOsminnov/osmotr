@@ -79,7 +79,6 @@ dependencies {
     implementation(platform(libs.compose.bom))
     implementation(libs.compose.ui)
     implementation(libs.compose.material3)
-    implementation(libs.compose.material.icons)
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.coil.compose)
     // Просмотр: зум с подгрузкой полного разрешения по месту — шильдик читается при ×12.

@@ -47,23 +47,13 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.DriveFileMove
-import androidx.compose.material.icons.automirrored.filled.Notes
-import androidx.compose.material.icons.filled.AccountTree
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.CameraAlt
-import androidx.compose.material.icons.filled.Checklist
-import androidx.compose.material.icons.filled.UploadFile
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.CreateNewFolder
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.DriveFileRenameOutline
-import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Person
-import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
@@ -210,8 +200,8 @@ fun BrowserScreen(
                 navigationIcon = { IconButton(onClick = { selected.clear() }) { Icon(Icons.Default.Close, "Снять выбор") } },
                 title = { Text(what(selected), maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleMedium) },
                 actions = {
-                    IconButton(onClick = { selected.clear(); selected.addAll(order) }) { Icon(Icons.Default.SelectAll, "Выбрать все") }
-                    IconButton(onClick = { moving = true }) { Icon(Icons.AutoMirrored.Filled.DriveFileMove, "Переместить") }
+                    IconButton(onClick = { selected.clear(); selected.addAll(order) }) { Icon(AppIcons.SelectAll, "Выбрать все") }
+                    IconButton(onClick = { moving = true }) { Icon(AppIcons.DriveFileMove, "Переместить") }
                     IconButton(onClick = {
                         val items = selected.toList()
                         // С папками — одним архивом со вложенностью; только снимки — как есть.
@@ -230,19 +220,19 @@ fun BrowserScreen(
                 title = { Breadcrumbs(dir, goTo) },
                 actions = {
                     IconButton(onClick = search) { Icon(Icons.Default.Search, "Поиск") }
-                    IconButton(onClick = tree) { Icon(Icons.Default.AccountTree, "Структура") }
-                    IconButton(onClick = { newFolder = true }) { Icon(Icons.Default.CreateNewFolder, "Новая папка") }
+                    IconButton(onClick = tree) { Icon(AppIcons.AccountTree, "Структура") }
+                    IconButton(onClick = { newFolder = true }) { Icon(AppIcons.CreateNewFolder, "Новая папка") }
                     Box {
                         IconButton(onClick = { menu = true }) { Icon(Icons.Default.MoreVert, "Ещё") }
                         DropdownMenu(menu, { menu = false }) {
                             // Опись — только где она есть (на главном описи — строками и «Новая опись»).
                             if (dir != Store.root) Inventory.objectOf(dir)?.let { obj ->
-                                DropdownMenuItem({ Text("Опись") }, leadingIcon = { Icon(Icons.Default.Checklist, null) },
+                                DropdownMenuItem({ Text("Опись") }, leadingIcon = { Icon(AppIcons.Checklist, null) },
                                     onClick = { menu = false; inventory(obj) })
                             }
                             // Папка без описи — прикрепить (начали снимать без неё, опись прислали потом).
                             if (dir != Store.root && Inventory.objectOf(dir) == null) DropdownMenuItem({ Text("Прикрепить опись") },
-                                leadingIcon = { Icon(Icons.Default.UploadFile, null) },
+                                leadingIcon = { Icon(AppIcons.UploadFile, null) },
                                 onClick = { menu = false; attachInventory() })
                             // Папка внутри описи — отметить, какие предметы в ней лежат.
                             Inventory.objectOf(dir)?.takeIf { it != dir }?.let { obj ->
@@ -262,10 +252,10 @@ fun BrowserScreen(
                                 DropdownMenuItem({ Text("Контакты") }, leadingIcon = { Icon(Icons.Default.Person, null) },
                                     onClick = { menu = false; contacts() })
                                 DropdownMenuItem({ Text(if (note == null) "Добавить комментарий" else "Комментарий") },
-                                    leadingIcon = { Icon(Icons.AutoMirrored.Filled.Notes, null) }, onClick = { menu = false; editingNote = true })
-                                DropdownMenuItem({ Text("Переместить папку") }, leadingIcon = { Icon(Icons.AutoMirrored.Filled.DriveFileMove, null) },
+                                    leadingIcon = { Icon(AppIcons.Notes, null) }, onClick = { menu = false; editingNote = true })
+                                DropdownMenuItem({ Text("Переместить папку") }, leadingIcon = { Icon(AppIcons.DriveFileMove, null) },
                                     onClick = { menu = false; movingFolder = true })
-                                DropdownMenuItem({ Text("Переименовать") }, leadingIcon = { Icon(Icons.Default.DriveFileRenameOutline, null) },
+                                DropdownMenuItem({ Text("Переименовать") }, leadingIcon = { Icon(AppIcons.DriveFileRenameOutline, null) },
                                     onClick = { menu = false; rename = true })
                                 DropdownMenuItem({ Text("Удалить папку") }, leadingIcon = { Icon(Icons.Default.Delete, null) },
                                     onClick = { menu = false; deleteFolder = true })
@@ -280,13 +270,13 @@ fun BrowserScreen(
             if (!selecting) {
                 if (dir == Store.root) ExtendedFloatingActionButton(
                     onClick = { pickInventory() },
-                    icon = { Icon(Icons.Default.Checklist, null) },
+                    icon = { Icon(AppIcons.Checklist, null) },
                     text = { Text("Новая опись", fontWeight = FontWeight.SemiBold) },
                     containerColor = MaterialTheme.colorScheme.primary,
                     contentColor = Color.White,
                 ) else ExtendedFloatingActionButton(
                     onClick = { camera(dir) },
-                    icon = { Icon(Icons.Default.CameraAlt, null) },
+                    icon = { Icon(AppIcons.CameraAlt, null) },
                     text = { Text("Снимать", fontWeight = FontWeight.SemiBold) },
                     containerColor = MaterialTheme.colorScheme.primary,
                     contentColor = Color.White,
@@ -311,7 +301,7 @@ fun BrowserScreen(
                     item(span = { GridItemSpan(maxLineSpan) }, key = "note", contentType = "note") {
                         Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceVariant)
                             .clickable { editingNote = true }.padding(12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                            Icon(Icons.AutoMirrored.Filled.Notes, null, tint = MaterialTheme.colorScheme.secondary)
+                            Icon(AppIcons.Notes, null, tint = MaterialTheme.colorScheme.secondary)
                             Text(text, style = MaterialTheme.typography.bodyMedium, maxLines = 6, overflow = TextOverflow.Ellipsis)
                         }
                     }
@@ -321,7 +311,7 @@ fun BrowserScreen(
                         Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.primary.copy(alpha = 0.16f))
                             .clickable { inventory(dir) }.padding(12.dp)) {
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                                Icon(Icons.Default.Checklist, null, tint = MaterialTheme.colorScheme.primary)
+                                Icon(AppIcons.Checklist, null, tint = MaterialTheme.colorScheme.primary)
                                 Text("Опись: осмотрено $done из $total", fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
                                 Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null)
                             }
@@ -451,8 +441,8 @@ private fun FolderCard(tile: Store.FolderTile, selected: Boolean, onClick: () ->
         }
         Box(Modifier.fillMaxSize().background(Brush.verticalGradient(0.35f to Color.Transparent, 1f to Color.Black.copy(alpha = 0.85f))))
         Row(Modifier.padding(8.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-            Icon(Icons.Default.Folder, null, Modifier.size(22.dp), tint = MaterialTheme.colorScheme.secondary)
-            if (tile.note != null) Icon(Icons.AutoMirrored.Filled.Notes, "Есть комментарий", Modifier.size(20.dp), tint = Color.White)
+            Icon(AppIcons.Folder, null, Modifier.size(22.dp), tint = MaterialTheme.colorScheme.secondary)
+            if (tile.note != null) Icon(AppIcons.Notes, "Есть комментарий", Modifier.size(20.dp), tint = Color.White)
         }
         Column(Modifier.align(Alignment.BottomStart).padding(8.dp)) {
             Text(tile.dir.name, color = Color.White, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis,
@@ -480,7 +470,7 @@ private fun InventoryRow(tile: Store.FolderTile, selected: Boolean, progress: Pa
         .background(if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.3f) else MaterialTheme.colorScheme.primary.copy(alpha = 0.14f))
         .clickable(onClick = onClick).padding(14.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-        Icon(if (selected) Icons.Default.CheckCircle else Icons.Default.Checklist, null, Modifier.size(28.dp), tint = MaterialTheme.colorScheme.primary)
+        Icon(if (selected) Icons.Default.CheckCircle else AppIcons.Checklist, null, Modifier.size(28.dp), tint = MaterialTheme.colorScheme.primary)
         Column(Modifier.weight(1f)) {
             Text(tile.dir.name, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
             if (progress == null) ParseProgress(tile.dir, compact = true)  // опись ещё читается — шкала, а не тишина
@@ -531,7 +521,7 @@ private fun ItemCard(items: List<Inventory.Item>, similar: List<Inventory.Item>,
             Icon(Icons.Default.Add, null); Text("  Ещё такие же в описи: ${similar.size} — сюда же")
         }
         // Вручную — по всему списку описи: отметить, что ещё лежит в этой папке.
-        TextButton(onClick = pick) { Icon(Icons.Default.Checklist, null); Text("  Добавить из описи") }
+        TextButton(onClick = pick) { Icon(AppIcons.Checklist, null); Text("  Добавить из описи") }
     }
 }
 
@@ -620,7 +610,7 @@ private fun PhotoCell(photo: File, selected: Boolean, modifier: Modifier) {
 @Composable
 private fun Empty(root: Boolean) {
     Column(Modifier.fillMaxSize().padding(32.dp), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
-        Icon(Icons.Default.CreateNewFolder, null, Modifier.size(56.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        Icon(AppIcons.CreateNewFolder, null, Modifier.size(56.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
         Text(
             if (root) "Создайте папку" else "Пусто",
             Modifier.padding(top = 12.dp), color = MaterialTheme.colorScheme.onSurfaceVariant,

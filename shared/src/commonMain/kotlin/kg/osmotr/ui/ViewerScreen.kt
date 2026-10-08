@@ -22,7 +22,6 @@ import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.DriveFileMove
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
@@ -77,7 +76,7 @@ fun ViewerScreen(dir: File, start: File, close: () -> Unit) {
         Row(Modifier.align(Alignment.BottomCenter).fillMaxWidth().background(Color.Black.copy(alpha = 0.45f)).navigationBarsPadding()
             .padding(vertical = 6.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
             Action(Icons.Default.Share, "Отправить") { sharePhotos(host, listOf(current)) }
-            Action(Icons.AutoMirrored.Filled.DriveFileMove, "Перенести") { moving = true }
+            Action(AppIcons.DriveFileMove, "Перенести") { moving = true }
             Action(Icons.Default.Delete, "Удалить") { Undo.trash(listOf(current)) }
         }
     }
