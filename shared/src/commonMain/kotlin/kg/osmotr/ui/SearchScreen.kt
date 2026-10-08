@@ -1,4 +1,12 @@
-package kg.osmotr
+package kg.osmotr.ui
+
+import kg.osmotr.core.File
+import kg.osmotr.core.Inventory
+import kg.osmotr.core.Platform
+import kg.osmotr.core.Search
+import kg.osmotr.core.Store
+import kg.osmotr.core.Xlsx
+import kotlinx.coroutines.IO
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -53,7 +61,6 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.io.File
 
 /** Поиск папок: поле с клавиатурой сразу, результаты по мере набора; касание — в папку. */
 @Composable

@@ -1,10 +1,15 @@
-package kg.osmotr
+@file:OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
 
-import android.content.Intent
-import android.net.Uri
-import android.provider.ContactsContract
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContract
+package kg.osmotr.ui
+
+import kg.osmotr.core.File
+import kg.osmotr.core.Inventory
+import kg.osmotr.core.Platform
+import kg.osmotr.core.Search
+import kg.osmotr.core.Store
+import kg.osmotr.core.Xlsx
+import kotlinx.coroutines.IO
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -19,7 +24,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.activity.compose.BackHandler
+import androidx.compose.ui.backhandler.BackHandler
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardActions
@@ -61,7 +66,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
@@ -69,7 +73,6 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import java.io.File
 
 /**
  * Контакты людей по папке — книгой Excel `Контакты.xlsx` в самой папке: открывается и
@@ -79,19 +82,14 @@ import java.io.File
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ContactsScreen(dir: File, close: () -> Unit) {
-    val context = LocalContext.current
+    val host = LocalHost.current
     val version by Store.version.collectAsStateWithLifecycle()
     val list by produceState<List<Store.Contact>?>(null, dir, version) { value = withContext(Dispatchers.IO) { Store.contacts(dir) } }
     var editing by remember { mutableStateOf<Pair<Int, Store.Contact>?>(null) }  // индекс −1 — новый
-    val pick = rememberLauncherForActivityResult(PickPhone) { uri ->
-        uri ?: return@rememberLauncherForActivityResult
-        runCatching {
-            context.contentResolver.query(uri, arrayOf(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME,
-                ContactsContract.CommonDataKinds.Phone.NUMBER), null, null, null)?.use { c ->
-                if (c.moveToFirst()) editing = -1 to Store.Contact(name = c.getString(0).orEmpty(), phone = c.getString(1).orEmpty())
-            }
-        }
-    }
+    val links = androidx.compose.ui.platform.LocalUriHandler.current
+    // Из телефонной книги: доступ только к выбранному, без разрешения на все контакты.
+    val pickPhone = host.pickPhone
+    fun pick() { pickPhone?.invoke { name, phone -> editing = -1 to Store.Contact(name = name, phone = phone) } }
     fun save(all: List<Store.Contact>) = Store.setContacts(dir, all)
 
     // Правка — вместо списка, а не поверх: касания не должны доходить до списка под ним.
@@ -109,7 +107,7 @@ fun ContactsScreen(dir: File, close: () -> Unit) {
                 navigationIcon = { IconButton(onClick = close) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Назад") } },
                 title = { Column { Text("Контакты"); Text(Store.title(dir), style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1) } },
-                actions = { IconButton(onClick = { runCatching { pick.launch(Unit) } }) { Icon(Icons.Default.Contacts, "Из телефонной книги") } },
+                actions = { IconButton(onClick = { runCatching { pick() } }) { Icon(Icons.Default.Contacts, "Из телефонной книги") } },
             )
         },
         floatingActionButton = {
@@ -134,10 +132,10 @@ fun ContactsScreen(dir: File, close: () -> Unit) {
                             }
                         }
                         if (c.phone.isNotBlank()) Link(Icons.Default.Phone, c.phone) {
-                            context.startActivity(Intent(Intent.ACTION_DIAL, Uri.parse("tel:" + c.phone.filter { it.isDigit() || it == '+' })))
+                            runCatching { links.openUri("tel:" + c.phone.filter { it.isDigit() || it == '+' }) }
                         }
                         if (c.email.isNotBlank()) Link(Icons.Default.Email, c.email) {
-                            runCatching { context.startActivity(Intent(Intent.ACTION_SENDTO, Uri.parse("mailto:" + c.email.trim()))) }
+                            runCatching { links.openUri("mailto:" + c.email.trim()) }
                         }
                         if (c.note.isNotBlank()) Text(c.note, style = MaterialTheme.typography.bodySmall)
                     }
@@ -210,11 +208,4 @@ private fun Field(label: String, value: String, type: KeyboardType, caps: Keyboa
     OutlinedTextField(value, onChange, modifier.fillMaxWidth(), label = { Text(label) }, singleLine = !last,
         keyboardOptions = KeyboardOptions(keyboardType = type, capitalization = caps, imeAction = if (last) ImeAction.Done else ImeAction.Next),
         keyboardActions = KeyboardActions(onNext = { focus.moveFocus(FocusDirection.Down) }, onDone = { onLast() }))
-}
-
-/** Выбрать номер из телефонной книги: доступ только к выбранному, без разрешения на все контакты. */
-private object PickPhone : ActivityResultContract<Unit, Uri?>() {
-    override fun createIntent(context: android.content.Context, input: Unit) =
-        Intent(Intent.ACTION_PICK).setType(ContactsContract.CommonDataKinds.Phone.CONTENT_TYPE)
-    override fun parseResult(resultCode: Int, intent: Intent?): Uri? = intent?.data
 }

@@ -1,7 +1,17 @@
-package kg.osmotr
+@file:OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
+
+package kg.osmotr.ui
+
+import kg.osmotr.core.File
+import kg.osmotr.core.Inventory
+import kg.osmotr.core.Platform
+import kg.osmotr.core.Search
+import kg.osmotr.core.Store
+import kg.osmotr.core.Xlsx
+import kotlinx.coroutines.IO
 
 import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.activity.compose.BackHandler
+import androidx.compose.ui.backhandler.BackHandler
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.lazy.grid.LazyGridState
@@ -85,7 +95,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -95,7 +104,6 @@ import coil3.request.ImageRequest
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.io.File
 
 /**
  * Папка: путь вверху (касание сегмента — туда), сетка — сначала вложенные папки с обложкой и
@@ -118,7 +126,7 @@ fun BrowserScreen(
     pickItems: (File) -> Unit,
     back: (() -> Unit)?,
 ) {
-    val context = LocalContext.current
+    val host = LocalHost.current
     val scope = rememberCoroutineScope()
     val version by Store.version.collectAsStateWithLifecycle()
     // Последнее содержимое папки — сразу, без пустого кадра; свежее подменит его по готовности.
@@ -153,20 +161,17 @@ fun BrowserScreen(
     }
     var zipping by remember { mutableStateOf<Float?>(null) }
     var zipError by remember { mutableStateOf<String?>(null) }
-    // Новая опись: выбрали файл — спросить имя (по имени файла) — своя папка — сразу в опись.
     // Новые описи: сразу несколько файлов, каждый — своя опись, без вопросов (та же загрузка,
     // что из «Поделиться» в мессенджере — InventoryImport).
-    val pickInventory = androidx.activity.compose.rememberLauncherForActivityResult(
-        androidx.activity.result.contract.ActivityResultContracts.OpenMultipleDocuments()) { uris ->
-        InventoryImport.start(context, scope, uris, inventory)
-    }
+    val pickInventory = { host.pickBooks(true) { InventoryImport.start(host, scope, it, inventory) } }
     // Прикрепить опись к папке, начатой без неё.
-    val attachInventory = androidx.activity.compose.rememberLauncherForActivityResult(
-        androidx.activity.result.contract.ActivityResultContracts.OpenDocument()) { uri ->
-        uri ?: return@rememberLauncherForActivityResult
-        scope.launch {
-            withContext(Dispatchers.IO) { runCatching { Inventory.attachBook(context, uri, displayName(context, uri), dir) } }
-                .onSuccess { inventory(dir) }.onFailure { zipError = "${displayName(context, uri)} — ${it.message}" }
+    val attachInventory = {
+        host.pickBooks(false) { got ->
+            val book = got.firstOrNull() ?: return@pickBooks
+            scope.launch {
+                withContext(Dispatchers.IO) { runCatching { Inventory.attachBook(book.bytes, book.name, dir) } }
+                    .onSuccess { inventory(dir) }.onFailure { zipError = "${book.name} — ${it.message}" }
+            }
         }
     }
     // Прогресс описей у папок (на главном — описи карточками).
@@ -209,12 +214,12 @@ fun BrowserScreen(
                     IconButton(onClick = {
                         val items = selected.toList()
                         // С папками — одним архивом со вложенностью; только снимки — как есть.
-                        if (items.none { it.isDirectory }) sharePhotos(context, items)
+                        if (items.none { it.isDirectory }) sharePhotos(host, items)
                         else scope.launch {
                             zipping = 0f
-                            val zip = runCatching { zipItems(context, items, dir, Store.title(dir)) { zipping = it } }
+                            val zip = runCatching { zipItems(host, items, dir, Store.title(dir)) { zipping = it } }
                             zipping = null
-                            zip.onSuccess { shareChecked(context, it) }.onFailure { zipError = it.message ?: "архив не собрался" }
+                            zip.onSuccess { shareChecked(host, it) }.onFailure { zipError = it.message ?: "архив не собрался" }
                         }
                     }) { Icon(Icons.Default.Share, "Отправить") }
                     IconButton(onClick = { Undo.trash(selected.toList()); selected.clear() }) { Icon(Icons.Default.Delete, "Удалить") }
@@ -237,7 +242,7 @@ fun BrowserScreen(
                             // Папка без описи — прикрепить (начали снимать без неё, опись прислали потом).
                             if (dir != Store.root && Inventory.objectOf(dir) == null) DropdownMenuItem({ Text("Прикрепить опись") },
                                 leadingIcon = { Icon(Icons.Default.UploadFile, null) },
-                                onClick = { menu = false; attachInventory.launch(arrayOf("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "application/octet-stream")) })
+                                onClick = { menu = false; attachInventory() })
                             // Папка внутри описи — отметить, какие предметы в ней лежат.
                             Inventory.objectOf(dir)?.takeIf { it != dir }?.let { obj ->
                                 DropdownMenuItem({ Text("Предметы из описи") }, leadingIcon = { Icon(Icons.Default.Add, null) },
@@ -247,9 +252,9 @@ fun BrowserScreen(
                                 menu = false
                                 scope.launch {
                                     zipping = 0f
-                                    val zip = runCatching { zipFolder(context, dir) { zipping = it } }
+                                    val zip = runCatching { zipFolder(host, dir) { zipping = it } }
                                     zipping = null
-                                    zip.onSuccess { shareChecked(context, it) }.onFailure { zipError = it.message ?: "архив не собрался" }
+                                    zip.onSuccess { shareChecked(host, it) }.onFailure { zipError = it.message ?: "архив не собрался" }
                                 }
                             })
                             if (dir != Store.root) {
@@ -273,7 +278,7 @@ fun BrowserScreen(
             // На главном — новая опись (у каждой описи своя папка); внутри — снимать сюда.
             if (!selecting) {
                 if (dir == Store.root) ExtendedFloatingActionButton(
-                    onClick = { pickInventory.launch(arrayOf("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "application/octet-stream")) },
+                    onClick = { pickInventory() },
                     icon = { Icon(Icons.Default.Checklist, null) },
                     text = { Text("Новая опись", fontWeight = FontWeight.SemiBold) },
                     containerColor = MaterialTheme.colorScheme.primary,
@@ -435,11 +440,11 @@ private fun Breadcrumbs(dir: File, goTo: (File) -> Unit) {
 
 @Composable
 private fun FolderCard(tile: Store.FolderTile, selected: Boolean, onClick: () -> Unit) {
-    val context = LocalContext.current
+    val host = LocalHost.current
     Box(Modifier.aspectRatio(1f).clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceVariant).clickable(onClick = onClick)) {
         tile.cover?.let { cover ->
             AsyncImage(
-                ImageRequest.Builder(context).data(Store.thumbOrPhoto(cover)).size(Store.THUMB_PX).build(),
+                ImageRequest.Builder(coil3.compose.LocalPlatformContext.current).data(Store.thumbOrPhoto(cover)).size(Store.THUMB_PX).build(),
                 contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize(),
             )
         }
@@ -597,10 +602,10 @@ private fun Modifier.dragToSelect(grid: LazyGridState, order: List<File>, select
 
 @Composable
 private fun PhotoCell(photo: File, selected: Boolean, modifier: Modifier) {
-    val context = LocalContext.current
+    val host = LocalHost.current
     Box(modifier.aspectRatio(1f).clip(RoundedCornerShape(6.dp)).background(MaterialTheme.colorScheme.surfaceVariant)) {
         AsyncImage(
-            ImageRequest.Builder(context).data(Store.thumbOrPhoto(photo)).size(Store.THUMB_PX).build(),
+            ImageRequest.Builder(coil3.compose.LocalPlatformContext.current).data(Store.thumbOrPhoto(photo)).size(Store.THUMB_PX).build(),
             contentDescription = photo.name, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize(),
         )
         if (selected) {
@@ -641,19 +646,19 @@ class ImportJob(val name: String) {
 object InventoryImport {
     val jobs = androidx.compose.runtime.mutableStateListOf<ImportJob>()
 
-    fun start(context: android.content.Context, scope: kotlinx.coroutines.CoroutineScope, uris: List<android.net.Uri>, open: (File) -> Unit) {
-        if (uris.isEmpty()) return
+    fun start(host: Host, scope: kotlinx.coroutines.CoroutineScope, books: List<Picked>, open: (File) -> Unit) {
+        if (books.isEmpty()) return
         jobs.clear()
-        val mine = uris.map { ImportJob(nameOf(context, it)) }
+        val mine = books.map { ImportJob(it.name) }
         jobs.addAll(mine)
         scope.launch {
             val gate = kotlinx.coroutines.sync.Semaphore(2)
-            uris.zip(mine).map { (uri, job) ->
+            books.zip(mine).map { (book, job) ->
                 launch {
                     gate.acquire()
                     try {
                         job.state = ImportJob.State.WORKING
-                        withContext(Dispatchers.IO) { runCatching { Inventory.importBook(context, uri, job.name) { job.file = it } } }
+                        withContext(Dispatchers.IO) { runCatching { Inventory.importBook(book.bytes, book.name) { job.file = it } } }
                             .onSuccess { job.items = it.items.size; job.dir = job.file?.parentFile; job.state = ImportJob.State.DONE }
                             .onFailure { job.error = it.message ?: "не получилось"; job.state = ImportJob.State.FAILED }
                     } finally { gate.release() }
@@ -663,16 +668,10 @@ object InventoryImport {
             if (mine.all { it.state == ImportJob.State.DONE }) {
                 jobs.clear()
                 if (mine.size == 1) mine.single().dir?.let(open)
-                else android.widget.Toast.makeText(context, "Добавлено: ${plural(mine.size, "опись", "описи", "описей")}", android.widget.Toast.LENGTH_SHORT).show()
+                else host.toast("Добавлено: ${plural(mine.size, "опись", "описи", "описей")}")
             }
         }
     }
-
-    /** Имя присланного файла; мессенджер не сказал — пусто (имя описи тогда — из книги). */
-    private fun nameOf(context: android.content.Context, uri: android.net.Uri): String =
-        runCatching { context.contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
-            if (c.moveToFirst()) c.getString(0) else null
-        } }.getOrNull() ?: uri.lastPathSegment?.substringAfterLast('/')?.takeIf { '.' in it } ?: ""
 }
 
 /** Окно загрузки описей: каждый файл — строкой со своей шкалой; закрыть — когда всё кончилось. */

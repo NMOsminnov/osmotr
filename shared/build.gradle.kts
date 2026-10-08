@@ -31,10 +31,16 @@ kotlin {
             implementation(libs.okio)
             implementation(libs.kotlinx.serialization.json)
             implementation(libs.atomicfu)
+            implementation(libs.coil.compose.mp)
+            implementation(libs.telephoto.zoomable)
+            implementation(libs.compose.icons.mp)
+            implementation(libs.lifecycle.runtime.compose.mp)
+            implementation(libs.compose.backhandler.mp)
             implementation(libs.kotlinx.coroutines.core)
         }
         androidMain.dependencies {
             implementation(libs.exifinterface)
+            implementation(libs.telephoto.coil3)
         }
         jvmTest.dependencies {
             implementation(kotlin("test-junit"))
@@ -44,5 +50,5 @@ kotlin {
 
 tasks.withType<Test>().configureEach {
     // Набор кривых описей — тот же, что у Android-тестов.
-    systemProperty("templates", rootProject.file("app/src/test/resources/templates").absolutePath)
+    systemProperty("templates", rootProject.file("shared/src/jvmTest/resources/templates").absolutePath)
 }

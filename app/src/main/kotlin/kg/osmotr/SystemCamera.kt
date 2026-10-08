@@ -8,6 +8,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import java.io.File
+import kg.osmotr.core.Store
+import kg.osmotr.core.File as KFile
 
 /**
  * Снимает штатная камера телефона — со всеми её настройками и обработкой (автор, 08.10.2026:
@@ -23,7 +25,7 @@ object SystemCamera {
     private const val PREFS = "camera-session"
 
     /** Заход: папка, время начала и приложение камеры, которое снимало (null — не узнали). */
-    data class Session(val dir: File, val startedMs: Long, val cameraPackage: String?)
+    data class Session(val dir: KFile, val startedMs: Long, val cameraPackage: String?)
 
     /** Снятое позже этого после начала захода — уже не осмотр (ушли из камеры «Домой» и снимали своё). */
     const val SESSION_MAX_MS = 2 * 60 * 60 * 1000L
@@ -31,7 +33,7 @@ object SystemCamera {
     fun session(context: Context): Session? {
         val p = context.getSharedPreferences(PREFS, 0)
         val dir = p.getString("dir", null) ?: return null
-        return Session(File(dir), p.getLong("started", 0), p.getString("package", null))
+        return Session(KFile(dir), p.getLong("started", 0), p.getString("package", null))
     }
 
     private fun end(context: Context) = context.getSharedPreferences(PREFS, 0).edit().clear().apply()
@@ -44,7 +46,7 @@ object SystemCamera {
      * возвращает сюда, а не в галерею камеры (автор, 08.10.2026: «жест назад из камеры в
      * галерею уводит»).
      */
-    fun begin(context: Context, dir: File) {
+    fun begin(context: Context, dir: KFile) {
         val camera = context.packageManager.resolveActivity(intent(), 0)?.activityInfo?.packageName
             ?.takeIf { it != "android" }  // «android» — окно выбора камеры, не сама камера
         context.getSharedPreferences(PREFS, 0).edit()
@@ -54,7 +56,7 @@ object SystemCamera {
 
     fun cancel(context: Context) = end(context)
 
-    data class Imported(val dir: File, val count: Int)
+    data class Imported(val dir: KFile, val count: Int)
 
     /**
      * Перенести снятое за заход в его папку. Камера дописывает кадры и после возврата (обработка
@@ -101,18 +103,19 @@ object SystemCamera {
                 val owner = if (q) c.getString(3) else null
                 if (!fromCamera(path, owner, s.cameraPackage)) continue
                 val f = File(path)
-                if (!Store.isPhoto(f) || f.absolutePath.startsWith(Store.root.absolutePath)) continue
+                if (!Store.isPhoto(KFile(f.absolutePath)) || f.absolutePath.startsWith(Store.root.absolutePath)) continue
                 found += f to c.getLong(1).takeIf { it > 0 }.let { it ?: f.lastModified() }
             }
         }
         // Сотня снимков за заход — обычное дело: переименование в пределах памяти мгновенно,
         // регистрация в системе и миниатюры — одной пачкой в фоне, экран — одно обновление.
-        val moved = mutableListOf<File>()
-        val sources = mutableListOf<File>()
+        val moved = mutableListOf<KFile>()
+        val sources = mutableListOf<KFile>()
         for ((f, taken) in found) {
             val target = Store.newPhotoFile(s.dir, f.extension.lowercase(), taken)
-            if (f.renameTo(target) || runCatching { f.copyTo(target); f.delete() }.getOrDefault(false)) {
-                moved += target; sources += f
+            val to = File(target.path)
+            if (f.renameTo(to) || runCatching { f.copyTo(to); f.delete() }.getOrDefault(false)) {
+                moved += target; sources += KFile(f.absolutePath)
             }
         }
         Store.saved(moved, removed = sources)

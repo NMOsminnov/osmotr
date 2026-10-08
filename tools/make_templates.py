@@ -8,14 +8,14 @@
 русских, инвентарник внутри наименования, числа текстом, таблица в углу листа, лишние листы,
 формулы, ячейки без адресов, объединённые ячейки.
 
-    python3 tools/make_templates.py      # → app/src/test/resources/templates/*.xlsx
+    python3 tools/make_templates.py      # → shared/src/jvmTest/resources/templates/*.xlsx
 """
 import os
 import zipfile
 
 import openpyxl
 
-OUT = os.path.join(os.path.dirname(__file__), "..", "app", "src", "test", "resources", "templates")
+OUT = os.path.join(os.path.dirname(__file__), "..", "shared", "src", "jvmTest", "resources", "templates")
 
 ITEMS = [
     ("777/1001", "Сканер штрих-кода Honeywell", 6900, 6210),

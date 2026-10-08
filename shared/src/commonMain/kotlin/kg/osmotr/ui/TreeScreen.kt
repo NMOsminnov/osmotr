@@ -1,6 +1,16 @@
-package kg.osmotr
+@file:OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
 
-import androidx.activity.compose.BackHandler
+package kg.osmotr.ui
+
+import kg.osmotr.core.File
+import kg.osmotr.core.Inventory
+import kg.osmotr.core.Platform
+import kg.osmotr.core.Search
+import kg.osmotr.core.Store
+import kg.osmotr.core.Xlsx
+import kotlinx.coroutines.IO
+
+import androidx.compose.ui.backhandler.BackHandler
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
@@ -28,7 +38,6 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import kotlinx.coroutines.launch
-import java.io.File
 
 /**
  * Структура «Осмотров» целиком — проверить, что где лежит, не открывая каждую папку, и

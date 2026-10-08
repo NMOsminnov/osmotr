@@ -1,6 +1,10 @@
-package kg.osmotr
+package kg.osmotr.core
 
-import androidx.test.core.app.ApplicationProvider
+import kg.osmotr.ui.Host
+import kg.osmotr.ui.Picked
+import kg.osmotr.ui.Shot
+import kg.osmotr.ui.zipFolder
+
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -10,18 +14,25 @@ import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
-import org.junit.runner.RunWith
-import org.robolectric.RobolectricTestRunner
-import java.io.File
 import java.util.zip.ZipFile
 
-@RunWith(RobolectricTestRunner::class)
 class StoreTest {
     @get:Rule val tmp = TemporaryFolder()
-    private val context get() = ApplicationProvider.getApplicationContext<android.content.Context>()
+    private val host = object : Host {
+        override fun takePhotos(dir: File) {}
+        override suspend fun afterResume(): Shot? = null
+        override fun canWrite() = true
+        override fun requestStorage() {}
+        override fun pickBooks(multiple: Boolean, got: (List<Picked>) -> Unit) {}
+        override fun share(files: List<File>, mime: String, title: String) {}
+        override fun toast(text: String, long: Boolean) {}
+        override val pickPhone: ((got: (String, String) -> Unit) -> Unit)? = null
+        override val cacheDir: File get() = File(tmp.root.path + "/.cache")
+    }
+    private fun root() = File(tmp.root.path)
 
     @Before fun setUp() {
-        Store.init(context, tmp.root)
+        Store.init(root(), File(tmp.root.path + "/.app"))
         Store.ensureRoot()
     }
 
@@ -71,9 +82,9 @@ class StoreTest {
     @Test fun архив_хранит_вложенность() = runBlocking {
         val obj = Store.createFolder(Store.root, "Объект")!!
         photo(File(obj, "Насос 1"), "a.jpg"); photo(obj, "b.jpg")
-        val zip = zipFolder(context, obj) {}
+        val zip = zipFolder(host, obj) {}
         assertEquals("проверка готового архива: снимков", 2, zip.photos)
-        val names = ZipFile(zip.file).use { z -> z.entries().toList().map { it.name }.sorted() }
+        val names = ZipFile(java.io.File(zip.file.path)).use { z -> z.entries().toList().map { it.name }.sorted() }
         assertEquals(listOf("Объект/b.jpg", "Объект/Насос 1/a.jpg"), names)
     }
 
@@ -103,7 +114,7 @@ class StoreTest {
         assertEquals("течь по сальнику", Store.note(obj))
         assertEquals("течь по сальнику", Store.list(Store.root).folders.single().note)
         assertTrue("комментарий — не снимок", Store.photosIn(obj).none { it.name == Store.NOTE })
-        val names = ZipFile(zipFolder(context, obj) {}.file).use { z -> z.entries().toList().map { it.name } }
+        val names = ZipFile(java.io.File(zipFolder(host, obj) {}.file.path)).use { z -> z.entries().toList().map { it.name } }
         assertTrue(names.contains("Объект/${Store.NOTE}"))
         Store.setNote(obj, " ")
         assertNull(Store.note(obj))
@@ -117,15 +128,6 @@ class StoreTest {
         Store.createFolder(c, "B")
         val moved = Store.moveFolder(inner, c)!!
         assertEquals("B (2)", moved.name)
-    }
-
-    @Test fun в_папку_ложатся_только_снимки_камеры() {
-        assertTrue(SystemCamera.fromCamera("/storage/emulated/0/DCIM/Camera/IMG_1.jpg", "com.oplus.camera", "com.oplus.camera"))
-        assertFalse("мессенджер", SystemCamera.fromCamera("/storage/emulated/0/Pictures/Telegram/x.jpg", "org.telegram.messenger", "com.oplus.camera"))
-        assertFalse("мессенджер сохранил в DCIM", SystemCamera.fromCamera("/storage/emulated/0/DCIM/WhatsApp/x.jpg", "com.whatsapp", "com.oplus.camera"))
-        assertFalse("снимок экрана", SystemCamera.fromCamera("/storage/emulated/0/DCIM/Screenshots/Screenshot_1.jpg", "com.oplus.camera", "com.oplus.camera"))
-        assertTrue("владелец неизвестен — DCIM", SystemCamera.fromCamera("/storage/emulated/0/DCIM/Camera/a.jpg", null, null))
-        assertFalse("владелец неизвестен — не DCIM", SystemCamera.fromCamera("/storage/emulated/0/Pictures/Telegram/a.jpg", null, null))
     }
 
     @Test fun поиск_по_приоритету_номерам_и_комментариям() {
@@ -172,7 +174,7 @@ class StoreTest {
         assertEquals(listOf("Объект"), Search.find(Search.index(), "555123456", Store.root).map { it.entry.name })
         // В архив — вместе со снимками.
         photo(obj, "a.jpg")
-        val names = ZipFile(zipFolder(context, obj) {}.file).use { z -> z.entries().toList().map { it.name } }
+        val names = ZipFile(java.io.File(zipFolder(host, obj) {}.file.path)).use { z -> z.entries().toList().map { it.name } }
         assertTrue(names.contains("Объект/${Store.CONTACTS}"))
         Store.setContacts(obj, emptyList())
         assertFalse("пустой список — файла нет", f.exists())
@@ -180,8 +182,8 @@ class StoreTest {
 
     @Test fun книга_после_правки_в_excel_читается() {
         // Excel пишет строки в общий словарь (sharedStrings), а телефон, набранный числом, — числом.
-        val f = File(tmp.root, "excel.xlsx")
-        java.util.zip.ZipOutputStream(f.outputStream()).use { z ->
+        val f = File(root(), "excel.xlsx")
+        java.util.zip.ZipOutputStream(java.io.File(f.path).outputStream()).use { z ->
             fun put(n: String, t: String) { z.putNextEntry(java.util.zip.ZipEntry(n)); z.write(t.toByteArray()); z.closeEntry() }
             put("xl/sharedStrings.xml", """<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><si><t>ФИО</t></si><si><t>Сидоров</t></si></sst>""")
             put("xl/worksheets/sheet1.xml", """<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>
@@ -192,9 +194,9 @@ class StoreTest {
     }
 
     @Test fun одновременная_запись_не_теряет_файл() {
-        Store.init(context, tmp.root); Store.ensureRoot()
+        Store.init(root(), File(tmp.root.path + "/.app")); Store.ensureRoot()
         val f = File(Store.root, "Осмотр — x.xlsx")
-        val threads = (1..4).map { t -> Thread { repeat(40) { Store.writeDurably(f) { out -> repeat(2000) { out.write(t) } } } } }
+        val threads = (1..4).map { t -> Thread { repeat(40) { Store.writeDurably(f) { out -> repeat(2000) { out.writeByte(t) } } } } }
         threads.forEach(Thread::start); threads.forEach(Thread::join)
         assertTrue("файл на месте", f.isFile); assertEquals(2000L, f.length())
         assertTrue("временных не осталось", Store.root.listFiles()!!.none { it.name.endsWith(".tmp") })

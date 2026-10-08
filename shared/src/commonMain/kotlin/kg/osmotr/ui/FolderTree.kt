@@ -1,4 +1,12 @@
-package kg.osmotr
+package kg.osmotr.ui
+
+import kg.osmotr.core.File
+import kg.osmotr.core.Inventory
+import kg.osmotr.core.Platform
+import kg.osmotr.core.Search
+import kg.osmotr.core.Store
+import kg.osmotr.core.Xlsx
+import kotlinx.coroutines.IO
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.slideInVertically
@@ -69,7 +77,6 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
-import java.io.File
 import kotlin.math.roundToInt
 
 /** Вся структура папок: кто чей ребёнок, сколько внутри снимков и папок (со вложенными). */

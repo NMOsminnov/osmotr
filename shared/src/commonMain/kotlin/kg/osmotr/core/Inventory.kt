@@ -53,7 +53,16 @@ object Inventory {
     /** Латинские буквы, похожие на русские, — русскими (в заголовках их путают). */
     private val LOOKALIKE = mapOf('a' to 'а', 'e' to 'е', 'o' to 'о', 'p' to 'р', 'c' to 'с', 'x' to 'х', 'y' to 'у',
         'k' to 'к', 'h' to 'н', 'm' to 'м', 't' to 'т', 'b' to 'в', 'n' to 'п', 'u' to 'и', 'r' to 'г')
-    private fun norm(s: String) = s.lowercase().replace('ё', 'е').replace(Regex("""\s+"""), " ").trim()
+    /** Нижний регистр, ё → е, пробелы схлопнуты — без регулярных выражений (зовётся на каждую ячейку). */
+    private fun norm(s: String): String {
+        val sb = StringBuilder(s.length); var space = false
+        for (ch in s) {
+            if (ch.isWhitespace()) { space = sb.isNotEmpty(); continue }
+            if (space) { sb.append(' '); space = false }
+            val c = ch.lowercaseChar(); sb.append(if (c == 'ё') 'е' else c)
+        }
+        return sb.toString()
+    }
     /** Для русских слов: латиница → кириллица, только если в слове уже есть кириллица (иначе «cost» не испортить). */
     private fun ru(s: String) = norm(s).split(' ').joinToString(" ") { w ->
         if (w.any { it in 'а'..'я' }) w.map { LOOKALIKE[it] ?: it }.joinToString("") else w
@@ -148,18 +157,56 @@ object Inventory {
     /** Число из ячейки: «1 044 321,55 сом», «1.», «12 000,5» — с пробелами, валютой, точкой в конце. */
     fun number(s: String): Double? {
         // Быстро: обычное число (так их пишет Excel) — сразу; текст не с цифры («Сервер…», «№ 1») — не число.
+        // Без регулярных выражений: на телефоне эта функция зовётся сотни тысяч раз на опись.
         if (s.isEmpty()) return null
-        s.toDoubleOrNull()?.let { return it }
+        plainDouble(s)?.let { return it }
         val first = s.trimStart().firstOrNull() ?: return null
         if (!first.isDigit() && first != '-' && first != '+') return null
-        var t = s.replace(Regex("""[\s\u00A0\u202F]"""), "").replace(Regex("""(?i)(сом|руб\.?|som|kgs|\$|₽|шт\.?)$"""), "").trimEnd('.')
+        val sb = StringBuilder(s.length)
+        for (ch in s) if (!ch.isWhitespace() && ch != '\u00A0' && ch != '\u202F') sb.append(ch)
+        var t = sb.toString()
+        for (suffix in CURRENCY) if (t.endsWith(suffix, ignoreCase = true)) { t = t.dropLast(suffix.length); break }
+        t = t.trimEnd('.')
         // И запятая, и точка: дробная часть — за последним из них («1,033,993.19», «1.033.993,19»).
         if (',' in t && '.' in t) t = if (t.lastIndexOf(',') > t.lastIndexOf('.')) t.replace(".", "").replace(',', '.') else t.replace(",", "")
-        return t.replace(',', '.').toDoubleOrNull()
+        return plainDouble(t.replace(',', '.'))
+    }
+
+    private val CURRENCY = listOf("руб.", "руб", "сом", "som", "kgs", "$", "₽", "шт.", "шт")
+
+    /** Обычное десятичное число («-12.5», «1e5», «7.») — без регулярных выражений; иначе null. */
+    private fun plainDouble(s: String): Double? {
+        var i = 0; val n = s.length
+        if (n == 0) return null
+        if (s[0] == '+' || s[0] == '-') i++
+        var digits = 0; var dot = false; var exp = false
+        while (i < n) {
+            val c = s[i]
+            when {
+                c in '0'..'9' -> digits++
+                c == '.' && !dot && !exp -> dot = true
+                (c == 'e' || c == 'E') && !exp && digits > 0 -> {
+                    exp = true
+                    if (i + 1 < n && (s[i + 1] == '+' || s[i + 1] == '-')) i++
+                    if (i + 1 >= n) return null
+                }
+                else -> return null
+            }
+            i++
+        }
+        if (digits == 0) return null
+        return s.toDoubleOrNull()
     }
 
     private fun whole(d: Double) = d == kotlin.math.floor(d) && !d.isInfinite()
     private val TOTAL = Regex("""^(итого|всего|total|жыйынтык|бардыгы)""")
+    private val TOTAL_FIRST = setOf('и', 'в', 't', 'ж', 'б')
+    /** Начинается с «Итого», «Всего»…: сначала дешёвая проверка первой буквы, регулярка — только тогда. */
+    private fun isTotal(cell: String): Boolean {
+        val t = cell.trimStart()
+        if (t.length < 5 || t[0].lowercaseChar() !in TOTAL_FIRST) return false
+        return TOTAL.containsMatchIn(t.take(12).lowercase())
+    }
 
     /** Строка «1 2 3 4 …» под шапкой (номера столбцов в печатных формах). */
     private fun isNumbering(r: List<String>): Boolean {
@@ -175,8 +222,11 @@ object Inventory {
 
     /** Раздел («Кабинет 101», «Здание 2»): в строке одно значение (объединённое на ширину — тоже). */
     private fun sectionOf(r: List<String>): String? {
-        val v = r.filter { it.isNotBlank() }.map { it.trim() }.distinct()
-        return v.singleOrNull()?.takeIf { s -> s.any(Char::isLetter) && !TOTAL.containsMatchIn(norm(s)) }
+        // Быстро: два разных непустых значения — не раздел (так почти у всех строк данных).
+        var one: String? = null
+        for (c in r) { if (c.isBlank()) continue; val t = c.trim(); if (one == null) one = t else if (one != t) return null }
+        val v = listOfNotNull(one)
+        return v.singleOrNull()?.takeIf { s -> s.any(Char::isLetter) && !isTotal(s) }
     }
 
     /** Насколько значения столбца похожи на поле. */
@@ -247,7 +297,7 @@ object Inventory {
         for (c in r.indices) {
             val h = headers.getOrElse(c) { "" }; val cell = r[c]
             // Дёшево отсеять: ячейка длиннее заголовка или пуста — не повтор.
-            if (cell.isBlank() || h.isEmpty() || cell.length > h.length + 2) continue
+            if (cell.isBlank() || h.isEmpty() || cell.length > h.length + 2 || number(cell) != null) continue
             val v = ru(cell)
             if (v.isNotEmpty() && ru(h).contains(v) && number(cell) == null && ++hits >= 2) return true
         }
@@ -259,7 +309,7 @@ object Inventory {
 
     /** Строка данных: не пустая, не итог, не повтор шапки, не «1 2 3…», не раздел. */
     private fun dataRow(r: List<String>, headers: List<String>): Boolean =
-        r.any { it.isNotBlank() } && r.none { it.length >= 5 && TOTAL.containsMatchIn(it.trimStart().take(12).lowercase()) } &&
+        r.any { it.isNotBlank() } && r.none(::isTotal) &&
             !repeatOf(r, headers) && !isNumbering(r) && sectionOf(r) == null
 
     private val INV_IN_NAME = Regex("""[,;(]?\s*(?:инв|inv)[a-zа-я]*\.?\s*(?:№|n|no|номер)?\s*[:.]?\s*([0-9A-Za-zА-Яа-яЁё](?:[0-9A-Za-zА-Яа-яЁё/.,\-]| (?=\d))*[0-9A-Za-zА-Яа-яЁё])\)?""", RegexOption.IGNORE_CASE)

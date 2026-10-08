@@ -123,6 +123,20 @@ object Xlsx {
 
     /** Число как его показывает Excel, без хвостов: «996555123456.0» → «996555123456», «1E+5» → «100000». */
     fun plain(raw: String): String {
+        // Частый случай — целое или десятичное без степени: без регулярных выражений.
+        var simple = raw.isNotEmpty(); var dot = -1
+        for ((k, c) in raw.withIndex()) {
+            if (c == '.' && dot < 0) dot = k else if (c !in '0'..'9' && !(k == 0 && c == '-')) { simple = false; break }
+        }
+        if (simple && raw != "-" && raw != ".") {
+            val neg = raw.startsWith("-")
+            val body = if (neg) raw.drop(1) else raw
+            val d = body.indexOf('.')
+            val int = (if (d < 0) body else body.substring(0, d)).trimStart('0').ifEmpty { "0" }
+            val frac = if (d < 0) "" else body.substring(d + 1).trimEnd('0')
+            val out = if (frac.isNotEmpty()) "$int.$frac" else int
+            return if (out == "0") "0" else (if (neg) "-" else "") + out
+        }
         val m = Regex("""^([+-]?)(\d*)(?:\.(\d*))?(?:[eE]([+-]?\d+))?$""").matchEntire(raw.trim()) ?: return raw
         val (sign, intPart, fracPart, exp) = m.destructured
         if (intPart.isEmpty() && fracPart.isEmpty()) return raw

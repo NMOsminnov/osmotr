@@ -1,5 +1,5 @@
 /**
- * Те же самые кривые описи, что и на Android (app/src/test/resources/templates, генератор —
+ * Те же самые кривые описи, что и на Android (shared/src/jvmTest/resources/templates, генератор —
  * tools/make_templates.py): разбор PWA должен совпадать с Android один в один.
  */
 import { describe, expect, test } from 'vitest'
@@ -8,7 +8,7 @@ import { sheets } from '../src/xlsx'
 import { detect, items as itemsOf, number, headerScore, Field, folderName, type Item } from '../src/inventory'
 import { scoreItem } from '../src/search'
 
-const dir = new URL('../../app/src/test/resources/templates/', import.meta.url)
+const dir = new URL('../../shared/src/jvmTest/resources/templates/', import.meta.url)
 const book = (name: string) => sheets(new Uint8Array(readFileSync(new URL(name, dir))))
 const items = (name: string) => {
   const tables = book(name).map(s => [s, detect(s)] as const).filter(([, t]) => t)

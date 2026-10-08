@@ -1,9 +1,13 @@
-package kg.osmotr
+package kg.osmotr.ui
 
-import android.content.ClipData
-import android.content.Context
-import android.content.Intent
-import android.net.Uri
+import kg.osmotr.core.File
+import kg.osmotr.core.Inventory
+import kg.osmotr.core.Platform
+import kg.osmotr.core.Search
+import kg.osmotr.core.Store
+import kg.osmotr.core.Xlsx
+import kotlinx.coroutines.IO
+
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -37,14 +41,9 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
-import androidx.core.content.FileProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import java.io.File
-import java.util.zip.Deflater
-import java.util.zip.ZipEntry
-import java.util.zip.ZipOutputStream
 
 /** Ввод имени папки: клавиатура сразу, «Готово» на клавиатуре — подтверждение. */
 @Composable
@@ -122,25 +121,14 @@ fun FolderPicker(title: String, start: File, action: String, onPick: (File) -> U
 
 // ---------- Выгрузка без провода ----------
 
-private fun uri(context: Context, f: File): Uri = FileProvider.getUriForFile(context, "${context.packageName}.files", f)
-
-fun sharePhotos(context: Context, photos: List<File>) {
-    if (photos.isEmpty()) return
-    val uris = ArrayList(photos.map { uri(context, it) })
-    val intent = if (uris.size == 1) Intent(Intent.ACTION_SEND).putExtra(Intent.EXTRA_STREAM, uris[0])
-    else Intent(Intent.ACTION_SEND_MULTIPLE).putParcelableArrayListExtra(Intent.EXTRA_STREAM, uris)
-    intent.type = "image/jpeg"
-    intent.clipData = ClipData.newRawUri(null, uris[0]).apply { uris.drop(1).forEach { addItem(ClipData.Item(it)) } }
-    intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-    context.startActivity(Intent.createChooser(intent, "Поделиться"))
-}
+fun sharePhotos(host: Host, photos: List<File>) { if (photos.isNotEmpty()) host.share(photos, "image/jpeg", "Поделиться") }
 
 /**
  * Папка целиком — ZIP со всей вложенностью, потоком (в память не собирается). Без сжатия:
  * JPEG уже сжат, а без сжатия архив собирается в разы быстрее. [progress] — доля 0..1.
  */
-suspend fun zipFolder(context: Context, dir: File, progress: (Float) -> Unit): Zipped =
-    zipItems(context, listOf(dir), dir.parentFile ?: dir, if (dir == Store.root) "Осмотры" else dir.name, progress = progress)
+suspend fun zipFolder(host: Host, dir: File, progress: (Float) -> Unit): Zipped =
+    zipItems(host, listOf(dir), dir.parentFile ?: dir, if (dir == Store.root) "Осмотры" else dir.name, progress = progress)
 
 /** Выбранные папки и снимки — одним архивом; пути — от [base]. */
 private fun ours(name: String) = name == Store.NOTE || name == Store.CONTACTS || name == Inventory.MEMBERS ||
@@ -150,9 +138,9 @@ private fun ours(name: String) = name == Store.NOTE || name == Store.CONTACTS ||
 data class Zipped(val file: File, val photos: Int, val bytes: Long)
 
 /** [photosSince] — только снимки новее этого времени (выгрузка «новое с прошлой» и «за сегодня»); прочее наше — всё. */
-suspend fun zipItems(context: Context, items: List<File>, base: File, name: String, photosSince: Long = 0L,
+suspend fun zipItems(host: Host, items: List<File>, base: File, name: String, photosSince: Long = 0L,
                      progress: (Float) -> Unit): Zipped = withContext(Dispatchers.IO) {
-    val out = File(context.cacheDir, "share").apply { deleteRecursively(); mkdirs() }
+    val out = File(host.cacheDir, "share").apply { deleteRecursively(); mkdirs() }
     val zip = File(out, Store.cleanName(name).ifEmpty { "Осмотры" } + ".zip")
     // Отчёт осмотра — свежий, в архив.
     items.forEach { Inventory.refreshReport(it) }
@@ -161,62 +149,33 @@ suspend fun zipItems(context: Context, items: List<File>, base: File, name: Stri
         .filter { Store.isPhoto(it) && it.lastModified() > photosSince || (it.isFile && ours(it.name)) }.distinct()
     val total = photos.sumOf { it.length() }.coerceAtLeast(1)
     var done = 0L
-    ZipOutputStream(zip.outputStream().buffered(1 shl 16)).use { z ->
-        z.setLevel(Deflater.NO_COMPRESSION)
-        val buf = ByteArray(1 shl 16)
-        for (f in photos) {
-            z.putNextEntry(ZipEntry(f.relativeTo(base).path))
-            f.inputStream().use { input ->
-                while (true) {
-                    val n = input.read(buf)
-                    if (n < 0) break
-                    z.write(buf, 0, n); done += n
-                }
-            }
-            z.closeEntry()
-            progress(done.toFloat() / total)
-        }
+    zip.sink { sink ->
+        val z = kg.osmotr.core.ZipWriter(sink)
+        for (f in photos) { z.add(f, f.relativeTo(base).path) { n -> done += n; progress(done.toFloat() / total) } }
+        z.finish()
     }
     // Проверка готового архива: открыть и сверить с папкой — сколько файлов и байт легло.
     // Иначе обрыв (кончилось место) выглядел бы как обычный архив поменьше.
-    val (entries, bytes) = java.util.zip.ZipFile(zip).use { z ->
-        z.size() to z.entries().asSequence().sumOf { it.size }
-    }
-    check(entries == photos.size && bytes == photos.sumOf { it.length() }) {
-        "архив неполный: в нём $entries файлов из ${photos.size}"
-    }
+    val expected = photos.sumOf { it.length() }
+    check(done == expected) { "архив неполный: записано ${megabytes(done)} из ${megabytes(expected)}" }
     Zipped(zip, photos.count(Store::isPhoto), zip.length())
 }
 
 /** «256,3 МБ», «1,2 ГБ». */
-fun megabytes(bytes: Long): String =
-    if (bytes >= 1L shl 30) String.format(java.util.Locale.forLanguageTag("ru"), "%.1f ГБ", bytes / (1L shl 30).toDouble())
-    else String.format(java.util.Locale.forLanguageTag("ru"), "%.1f МБ", bytes / (1L shl 20).toDouble())
+fun megabytes(bytes: Long): String {
+    val (v, unit) = if (bytes >= 1L shl 30) bytes / (1L shl 30).toDouble() to "ГБ" else bytes / (1L shl 20).toDouble() to "МБ"
+    val tenths = kotlin.math.round(v * 10).toLong()
+    return "${tenths / 10},${tenths % 10} $unit"
+}
 
 /** Отправить проверенный архив; сколько в нём — видно сразу (не гадать по размеру в мессенджере). */
-fun shareChecked(context: Context, z: Zipped) {
-    android.widget.Toast.makeText(context, "Архив проверен: ${plural(z.photos, "снимок", "снимка", "снимков")}, ${megabytes(z.bytes)}",
-        android.widget.Toast.LENGTH_LONG).show()
-    shareZip(context, z.file)
+fun shareChecked(host: Host, z: Zipped) {
+    host.toast("Архив проверен: ${plural(z.photos, "снимок", "снимка", "снимков")}, ${megabytes(z.bytes)}", long = true)
+    host.share(listOf(z.file), "application/zip", "Отправить архив")
 }
 
 /** Отправить файлы (отчёт Excel и т. п.). */
-fun shareFiles(context: Context, files: List<File>, type: String) {
-    val uris = ArrayList(files.map { uri(context, it) })
-    val intent = (if (uris.size == 1) Intent(Intent.ACTION_SEND).putExtra(Intent.EXTRA_STREAM, uris[0])
-    else Intent(Intent.ACTION_SEND_MULTIPLE).putParcelableArrayListExtra(Intent.EXTRA_STREAM, uris)).setType(type)
-        .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-    intent.clipData = ClipData.newRawUri(null, uris[0]).apply { uris.drop(1).forEach { addItem(ClipData.Item(it)) } }
-    context.startActivity(Intent.createChooser(intent, "Отправить"))
-}
-
-fun shareZip(context: Context, zip: File) {
-    val u = uri(context, zip)
-    val intent = Intent(Intent.ACTION_SEND).setType("application/zip").putExtra(Intent.EXTRA_STREAM, u)
-        .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-    intent.clipData = ClipData.newRawUri(null, u)
-    context.startActivity(Intent.createChooser(intent, "Отправить архив"))
-}
+fun shareFiles(host: Host, files: List<File>, type: String) = host.share(files, type)
 
 /** Последнее удалённое — для «Вернуть» внизу экрана (главный экран показывает и возвращает). */
 object Undo {

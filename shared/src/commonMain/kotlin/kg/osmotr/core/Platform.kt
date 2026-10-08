@@ -3,6 +3,9 @@ package kg.osmotr.core
 /** Распаковать .xlsx (zip) целиком: имя файла внутри → содержимое. Не zip — пусто. */
 expect fun unzip(bytes: ByteArray): Map<String, ByteArray>
 
+/** Сжать (deflate без обёртки, как в zip); не вышло — null (тогда запись без сжатия). */
+expect fun deflateRaw(bytes: ByteArray): ByteArray?
+
 /** Память для оценок заголовков: на JVM — общая потокобезопасная, на iOS — своя у потока. */
 expect fun memoMap(): MutableMap<String, Int>
 

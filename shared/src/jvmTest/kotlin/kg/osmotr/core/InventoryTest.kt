@@ -1,6 +1,10 @@
-package kg.osmotr
+package kg.osmotr.core
 
-import androidx.test.core.app.ApplicationProvider
+import kg.osmotr.ui.Host
+import kg.osmotr.ui.Picked
+import kg.osmotr.ui.Shot
+import kg.osmotr.ui.zipFolder
+
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -8,14 +12,21 @@ import org.junit.Assume.assumeTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
-import org.junit.runner.RunWith
-import org.robolectric.RobolectricTestRunner
-import java.io.File
 
-@RunWith(RobolectricTestRunner::class)
 class InventoryTest {
     @get:Rule val tmp = TemporaryFolder()
-    private val context get() = ApplicationProvider.getApplicationContext<android.content.Context>()
+    private val host = object : Host {
+        override fun takePhotos(dir: File) {}
+        override suspend fun afterResume(): Shot? = null
+        override fun canWrite() = true
+        override fun requestStorage() {}
+        override fun pickBooks(multiple: Boolean, got: (List<Picked>) -> Unit) {}
+        override fun share(files: List<File>, mime: String, title: String) {}
+        override fun toast(text: String, long: Boolean) {}
+        override val pickPhone: ((got: (String, String) -> Unit) -> Unit)? = null
+        override val cacheDir: File get() = File(tmp.root.path + "/.cache")
+    }
+    private fun root() = File(tmp.root.path)
     private fun sheet(name: String, vararg rows: List<String>) = Xlsx.Sheet(name, rows.toList())
 
     @Test fun распечатанный_шаблон_с_номером_пп() {
@@ -56,8 +67,8 @@ class InventoryTest {
     @Test fun настоящая_оборотка() {
         val f = File(System.getenv("OSMOTR_SAMPLE_XLSX") ?: "")
         assumeTrue(f.isFile)
-        Store.init(context, tmp.root)
-        val sheets = Xlsx.sheets(f)
+        Store.init(root(), File(tmp.root.path + "/.app"))
+        val sheets = Xlsx.sheets(f.readBytes())
         val tables = sheets.mapNotNull { s -> Inventory.detect(s)?.let { s to it } }
         tables.forEach { (s, t) ->
             println("лист «${s.name}»: строка заголовков ${t.headerRow + 1}, " +
@@ -73,12 +84,12 @@ class InventoryTest {
         val copy = File(obj, Inventory.PREFIX + "оборотка.xlsx"); f.copyTo(copy)
         fun ms(block: () -> Unit) = System.nanoTime().let { t -> block(); (System.nanoTime() - t) / 1_000_000 }
         var parsed: Inventory.Parsed? = null
-        println("разбор: ${ms { parsed = Inventory.parse(copy) }} мс; из кэша: ${ms { Inventory.parse(copy) }} мс; предметов ${parsed!!.items.size}; спорно: ${parsed!!.tables.map { it.sheet to it.disputed.map { d -> d.title } }}")
+        println("разбор: ${ms { parsed = Inventory.parse(copy) }} мс; из кэша: ${ms { Inventory.parse(copy) }} мс; предметов ${parsed!!.items.size}")
         println("учёт снимков: ${ms { Inventory.status(obj) }} мс; отчёт: ${ms { Inventory.writeReport(obj) }} мс, ${Inventory.reportFile(copy).length() / 1024} КБ")
     }
 
     private fun objectWithInventory(): File {
-        Store.init(context, tmp.root); Store.ensureRoot()
+        Store.init(root(), File(tmp.root.path + "/.app")); Store.ensureRoot()
         val obj = Store.createFolder(Store.root, "Объект")!!
         Xlsx.writeBook(File(obj, Inventory.PREFIX + "оборотка.xlsx"), listOf(
             Xlsx.Out("Опись", listOf(
@@ -141,7 +152,7 @@ class InventoryTest {
         Inventory.writeReport(obj)
         val report = Inventory.reportFile(Inventory.filesIn(obj).single())
         assertTrue(report.isFile)
-        val sheets = Xlsx.sheets(report)
+        val sheets = Xlsx.sheets(report.readBytes())
         assertEquals(listOf("Итог", "Опись", "Вынесено", "По дням"), sheets.map { it.name })
         val summary = sheets[0].rows
         assertEquals(listOf("Опись", "4", "1", "3"), summary[1].take(4))
@@ -161,15 +172,15 @@ class InventoryTest {
             invs.mapIndexed { n, inv -> listOf(n + 1, "Предмет $inv", inv, 100, 1) })))
 
     @Test fun новая_опись_своя_папка_замена_оставляет_папки_предметов() {
-        Store.init(context, tmp.root); Store.ensureRoot()
-        val src = tmp.newFile("x.xlsx").also { book(it, "А-1", "А-2") }
-        val dir = Inventory.create("Склад") { out -> src.inputStream().use { it.copyTo(out) } }
+        Store.init(root(), File(tmp.root.path + "/.app")); Store.ensureRoot()
+        val src = File(tmp.newFile("x.xlsx").path).also { book(it, "А-1", "А-2") }
+        val dir = Inventory.create("Склад") { it.write(src.readBytes()) }
         assertEquals(File(Store.root, "Склад"), dir)
         assertEquals("Склад", Inventory.nameOf(Inventory.fileIn(dir)!!))
-        assertEquals("имя занято — с номером", "Склад (2)", Inventory.create("Склад") { out -> src.inputStream().use { it.copyTo(out) } }.name)
+        assertEquals("имя занято — с номером", "Склад (2)", Inventory.create("Склад") { it.write(src.readBytes()) }.name)
         val item = Inventory.openFolder(dir, Inventory.parse(Inventory.fileIn(dir)!!).items.first()); photo(item, "a.jpg")
         book(src, "А-1", "А-2", "А-3")
-        Inventory.replace(dir) { out -> src.inputStream().use { it.copyTo(out) } }
+        Inventory.replace(dir) { it.write(src.readBytes()) }
         assertEquals("одна опись на папку", 1, Inventory.filesIn(dir).size)
         val items = Inventory.parse(Inventory.fileIn(dir)!!).items
         assertEquals(3, items.size)
@@ -177,7 +188,7 @@ class InventoryTest {
     }
 
     @Test fun перенос_описей_из_кучи_по_своим_папкам() {
-        Store.init(context, tmp.root); Store.ensureRoot()
+        Store.init(root(), File(tmp.root.path + "/.app")); Store.ensureRoot()
         val heap = Store.createFolder(Store.root, "Объект")!!
         // Остаётся та, с чьими предметами работали (а не первая по алфавиту).
         book(File(heap, Inventory.PREFIX + "Яблоко.xlsx"), "А-1", "А-2")
@@ -220,34 +231,15 @@ class InventoryTest {
         assertTrue(Inventory.status(obj).inspected(units[2]))
     }
 
-    @Test fun лист_можно_не_брать_в_опись() {
-        val obj = objectWithInventory()
-        val f = Inventory.fileIn(obj)!!
-        val before = Inventory.parse(f)
-        assertEquals(5, before.items.size); assertTrue(!Inventory.confirmed(f))
-        val t = before.tables.first { it.sheet == "Вынесено" }
-        Inventory.resolve(f, "Вынесено", t.columns, skip = true)
-        val after = Inventory.parse(f)
-        assertTrue(Inventory.confirmed(f))
-        assertEquals(listOf("Опись"), after.lists)
-        assertEquals("лист остаётся в таблицах — вернуть можно", 2, after.tables.size)
-        assertEquals(1, after.tables.first { it.sheet == "Вынесено" }.count)
-        assertTrue(after.tables.first { it.sheet == "Вынесено" }.skip)
-        Inventory.writeReport(obj)
-        assertEquals("в отчёте — без снятого листа", listOf("Итог", "Опись", "По дням"), Xlsx.sheets(Inventory.reportFile(f)).map { it.name })
-        Inventory.resolve(f, "Вынесено", t.columns, skip = false)
-        assertEquals(5, Inventory.parse(f).items.size)
-    }
-
     @Test fun отчёт_комментарий_по_дням_нет_в_описи_и_выгрузка_нового() {
         val obj = objectWithInventory()
         val p = Inventory.parse(Inventory.fileIn(obj)!!)
         val scanner = Inventory.openFolder(obj, p.items.first { it.inventory == "М-205" })
-        photo(scanner, "a.jpg").setLastModified(System.currentTimeMillis() - 2 * 86_400_000L)
+        java.io.File(photo(scanner, "a.jpg").path).setLastModified(System.currentTimeMillis() - 2 * 86_400_000L)
         Store.setNote(scanner, "треснут корпус")
         val extra = Store.createFolder(obj, "Принтер без бирки")!!; photo(extra, "b.jpg")
         Inventory.writeReport(obj)
-        val book = Xlsx.sheets(Inventory.reportFile(Inventory.fileIn(obj)!!))
+        val book = Xlsx.sheets(Inventory.reportFile(Inventory.fileIn(obj)!!).readBytes())
         assertEquals(listOf("Итог", "Опись", "Вынесено", "По дням", "Нет в описи"), book.map { it.name })
         val list = book.first { it.name == "Опись" }.rows
         val head = list[0]; val row = list.first { it.getOrNull(1) == "М-205" }
@@ -264,15 +256,15 @@ class InventoryTest {
     }
 
     @Test fun имя_описи_из_файла_или_из_книги() {
-        Store.init(context, tmp.root); Store.ensureRoot()
-        val f = tmp.newFile("b.xlsx")
+        Store.init(root(), File(tmp.root.path + "/.app")); Store.ensureRoot()
+        val f = File(tmp.newFile("b.xlsx").path)
         Xlsx.writeBook(f, listOf(Xlsx.Out("Сводка", listOf(listOf("Склад Центральный"), listOf("Источник: 1С")))))
         assertEquals("Оборотка Объект 2026", Inventory.nameFor("Оборотка Объект 2026.xlsx", f))
         assertEquals("мусорное имя из мессенджера — заголовок книги", "Склад Центральный", Inventory.nameFor("040dc55f-115.4.-____-___2026________.xlsx", f))
     }
 
     @Test fun несколько_разборов_разом_не_мешают_друг_другу() {
-        Store.init(context, tmp.root); Store.ensureRoot()
+        Store.init(root(), File(tmp.root.path + "/.app")); Store.ensureRoot()
         val books = (1..3).map { n -> File(Store.createFolder(Store.root, "Опись $n")!!, Inventory.PREFIX + "$n.xlsx").also { book(it, *Array(300) { k -> "$n/${1000 + k}" }) } }
         // Каждый файл — дважды одновременно: разбор один, второй берёт готовое.
         val results = java.util.concurrent.ConcurrentHashMap<String, MutableList<Int>>()

@@ -1,4 +1,12 @@
-package kg.osmotr
+package kg.osmotr.ui
+
+import kg.osmotr.core.File
+import kg.osmotr.core.Inventory
+import kg.osmotr.core.Platform
+import kg.osmotr.core.Search
+import kg.osmotr.core.Store
+import kg.osmotr.core.Xlsx
+import kotlinx.coroutines.IO
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -32,23 +40,17 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import me.saket.telephoto.zoomable.ZoomSpec
-import me.saket.telephoto.zoomable.coil3.ZoomableAsyncImage
-import me.saket.telephoto.zoomable.rememberZoomableImageState
-import me.saket.telephoto.zoomable.rememberZoomableState
 import coil3.request.ImageRequest
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import java.io.File
 import androidx.compose.ui.unit.dp
 
 /** Просмотр снимков папки: листание, зум с полным разрешением; отправка, перенос, удаление. */
 @Composable
 fun ViewerScreen(dir: File, start: File, close: () -> Unit) {
-    val context = LocalContext.current
+    val host = LocalHost.current
     val version by Store.version.collectAsStateWithLifecycle()
     val photos by produceState<List<File>?>(null, dir, version) { value = withContext(Dispatchers.IO) { Store.photosIn(dir) } }
     val list = photos ?: return Box(Modifier.fillMaxSize().background(Color.Black))
@@ -61,12 +63,7 @@ fun ViewerScreen(dir: File, start: File, close: () -> Unit) {
         HorizontalPager(pager, Modifier.fillMaxSize(), key = { list[it].path }, beyondViewportPageCount = 1) { page ->
             // Приближение подгружает полное разрешение только видимой области (telephoto, разбиение
             // на плитки): шильдик читается при сильном зуме, а 12 МП целиком в память не поднимаются.
-            ZoomableAsyncImage(
-                model = ImageRequest.Builder(context).data(list[page]).build(),
-                contentDescription = list[page].name,
-                modifier = Modifier.fillMaxSize(),
-                state = rememberZoomableImageState(rememberZoomableState(zoomSpec = ZoomSpec(maxZoomFactor = 12f))),
-            )
+            ZoomablePhoto(list[page], Modifier.fillMaxSize())
         }
         Row(Modifier.fillMaxWidth().background(Color.Black.copy(alpha = 0.45f)).statusBarsPadding().padding(4.dp),
             verticalAlignment = Alignment.CenterVertically) {
@@ -79,7 +76,7 @@ fun ViewerScreen(dir: File, start: File, close: () -> Unit) {
         }
         Row(Modifier.align(Alignment.BottomCenter).fillMaxWidth().background(Color.Black.copy(alpha = 0.45f)).navigationBarsPadding()
             .padding(vertical = 6.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
-            Action(Icons.Default.Share, "Отправить") { sharePhotos(context, listOf(current)) }
+            Action(Icons.Default.Share, "Отправить") { sharePhotos(host, listOf(current)) }
             Action(Icons.AutoMirrored.Filled.DriveFileMove, "Перенести") { moving = true }
             Action(Icons.Default.Delete, "Удалить") { Undo.trash(listOf(current)) }
         }
@@ -96,3 +93,7 @@ private fun Action(icon: androidx.compose.ui.graphics.vector.ImageVector, label:
         Text(label, color = Color.White, style = MaterialTheme.typography.labelSmall)
     }
 }
+
+/** Снимок с приближением: Android — с подгрузкой полного разрешения видимой части, iPhone — обычный. */
+@Composable
+expect fun ZoomablePhoto(photo: File, modifier: Modifier)

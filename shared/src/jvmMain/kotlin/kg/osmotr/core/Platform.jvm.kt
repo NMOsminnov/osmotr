@@ -11,6 +11,15 @@ actual fun unzip(bytes: ByteArray): Map<String, ByteArray> = runCatching {
     out
 }.getOrDefault(emptyMap())
 
+actual fun deflateRaw(bytes: ByteArray): ByteArray? = runCatching {
+    val d = java.util.zip.Deflater(6, true)
+    d.setInput(bytes); d.finish()
+    val out = java.io.ByteArrayOutputStream(bytes.size / 4 + 64)
+    val buf = ByteArray(1 shl 16)
+    while (!d.finished()) { val n = d.deflate(buf); out.write(buf, 0, n) }
+    d.end(); out.toByteArray()
+}.getOrNull()
+
 actual fun memoMap(): MutableMap<String, Int> = ConcurrentHashMap()
 
 actual object Platform {

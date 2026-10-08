@@ -1,10 +1,16 @@
-package kg.osmotr
+@file:OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
 
-import android.net.Uri
-import android.provider.OpenableColumns
-import androidx.activity.compose.BackHandler
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
+package kg.osmotr.ui
+
+import kg.osmotr.core.File
+import kg.osmotr.core.Inventory
+import kg.osmotr.core.Platform
+import kg.osmotr.core.Search
+import kg.osmotr.core.Store
+import kg.osmotr.core.Xlsx
+import kotlinx.coroutines.IO
+
+import androidx.compose.ui.backhandler.BackHandler
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -71,7 +77,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -81,9 +86,6 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.io.File
-import java.text.NumberFormat
-import java.util.Locale
 
 /** Что помнит экран описи объекта, пока приложение открыто: фильтры и место в списке. */
 private class InventoryView {
@@ -99,8 +101,13 @@ private val views = HashMap<File, InventoryView>()
 
 private enum class Sort(val title: String) { NUMBER("№"), PRIORITY("Приоритет"), COST("Стоимость") }
 
-private val MONEY = NumberFormat.getNumberInstance(Locale.forLanguageTag("ru")).apply { maximumFractionDigits = 2; minimumFractionDigits = 2 }
-fun money(v: Double?) = v?.let { MONEY.format(it) } ?: ""
+/** «1 044 321,55» — деньги по-русски: тысячи через пробел, два знака после запятой. */
+fun money(v: Double?): String {
+    if (v == null) return ""
+    val cents = kotlin.math.round(kotlin.math.abs(v) * 100).toLong()
+    val int = (cents / 100).toString().reversed().chunked(3).joinToString("\u00A0").reversed()
+    return (if (v < 0) "-" else "") + int + "," + (cents % 100).toString().padStart(2, '0')
+}
 
 /**
  * Осмотр по описи объекта: ходим по списку и снимаем. Сверху — поиск (набрал номер с бирки —
@@ -113,7 +120,7 @@ fun money(v: Double?) = v?.let { MONEY.format(it) } ?: ""
 @Composable
 fun InventoryScreen(obj: File, into: File? = null, openFolder: (File) -> Unit, folders: (File) -> Unit, close: () -> Unit,
                     picked: (File) -> Unit = {}) {
-    val context = LocalContext.current
+    val host = LocalHost.current
     val scope = rememberCoroutineScope()
     val keyboard = LocalSoftwareKeyboardController.current
     // Набор в папку — свой список с начала (сверху — что уже в ней), опись помнит своё место.
@@ -173,18 +180,16 @@ fun InventoryScreen(obj: File, into: File? = null, openFolder: (File) -> Unit, f
     }
     BackHandler(enabled = target != null) { finish() }
 
-    val pick = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        uri ?: return@rememberLauncherForActivityResult
+    fun load() = host.pickBooks(false) { got ->
+        val book = got.firstOrNull() ?: return@pickBooks
         importing = true
         scope.launch {
-            val got = withContext(Dispatchers.IO) { runCatching { importFile(context, uri, obj) } }
+            val r = withContext(Dispatchers.IO) { runCatching { Inventory.attachBook(book.bytes, book.name, obj) } }
             importing = false
-            got.onFailure { android.widget.Toast.makeText(context, "${displayName(context, uri)}: ${it.message}", android.widget.Toast.LENGTH_LONG).show() }
-            val f = got.getOrNull()
-            if (f != null) { reparse++; val p = withContext(Dispatchers.IO) { Inventory.parse(f) }; }
+            r.onFailure { host.toast("${book.name}: ${it.message}", long = true) }
+            if (r.isSuccess) reparse++
         }
     }
-    fun load() = pick.launch(arrayOf("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "application/vnd.ms-excel", "application/octet-stream"))
 
     val d = data
     val all = d?.parsed?.flatMap { it.items }.orEmpty()
@@ -304,7 +309,7 @@ fun InventoryScreen(obj: File, into: File? = null, openFolder: (File) -> Unit, f
                         LinearProgressIndicator(progress = { if (scope2.isEmpty()) 0f else done.toFloat() / scope2.size }, Modifier.fillMaxWidth().padding(top = 4.dp))
                     }
                     // По приоритетам: «П1 5/7»; касание — только этот приоритет в списке.
-                    val byPriority = scope2.groupBy { it.priority }.filterKeys { it.isNotEmpty() }.toSortedMap(compareBy({ it.toIntOrNull() ?: Int.MAX_VALUE }, { it }))
+                    val byPriority = scope2.groupBy { it.priority }.filterKeys { it.isNotEmpty() }.entries.sortedWith(compareBy({ it.key.toIntOrNull() ?: Int.MAX_VALUE }, { it.key })).associate { it.key to it.value }
                     if (byPriority.isNotEmpty()) Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp),
                         horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         byPriority.forEach { (p, items) ->
@@ -420,13 +425,13 @@ fun InventoryScreen(obj: File, into: File? = null, openFolder: (File) -> Unit, f
  */
 @Composable
 private fun ExportDialog(obj: File, onClose: () -> Unit) {
-    val context = LocalContext.current
+    val host = LocalHost.current
     val scope = rememberCoroutineScope()
     data class Counts(val all: Int, val since: Int?, val last: Long?, val today: Int)
     val counts by produceState<Counts?>(null) {
         value = withContext(Dispatchers.IO) {
             val last = Inventory.lastExport(obj)
-            Counts(Inventory.photosSince(obj, 0), last?.let { Inventory.photosSince(obj, it) }, last, Inventory.photosSince(obj, Inventory.startOfDay()))
+            Counts(Inventory.photosSince(obj, 0), last?.let { Inventory.photosSince(obj, it) }, last, Inventory.photosSince(obj, Platform.startOfDay()))
         }
     }
     var zipping by remember { mutableStateOf<Float?>(null) }
@@ -434,9 +439,9 @@ private fun ExportDialog(obj: File, onClose: () -> Unit) {
     fun zip(since: Long, suffix: String) {
         zipping = 0f
         scope.launch {
-            val at = System.currentTimeMillis()
-            runCatching { zipItems(context, listOf(obj), obj.parentFile ?: obj, obj.name + suffix, photosSince = since) { zipping = it } }
-                .onSuccess { z -> withContext(Dispatchers.IO) { Inventory.markExport(obj, at) }; zipping = null; onClose(); shareChecked(context, z) }
+            val at = Platform.nowMs()
+            runCatching { zipItems(host, listOf(obj), obj.parentFile ?: obj, obj.name + suffix, photosSince = since) { zipping = it } }
+                .onSuccess { z -> withContext(Dispatchers.IO) { Inventory.markExport(obj, at) }; zipping = null; onClose(); shareChecked(host, z) }
                 .onFailure { zipping = null; error = it.message }
         }
     }
@@ -464,7 +469,7 @@ private fun ExportDialog(obj: File, onClose: () -> Unit) {
                         option("Отчёт Excel", "что осмотрено, что нет — один файл") {
                             scope.launch {
                                 val reports = withContext(Dispatchers.IO) { Inventory.writeReport(obj); Inventory.filesIn(obj).map(Inventory::reportFile).filter { it.isFile } }
-                                onClose(); if (reports.isNotEmpty()) shareFiles(context, reports, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+                                onClose(); if (reports.isNotEmpty()) shareFiles(host, reports, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
                             }
                         }
                         option("Всё архивом", "отчёт, опись, комментарии и ${plural(c.all, "снимок", "снимка", "снимков")}") { zip(0L, "") }
@@ -473,7 +478,7 @@ private fun ExportDialog(obj: File, onClose: () -> Unit) {
                                 enabled = (c.since ?: 0) > 0) { zip(last, " — новое") }
                         }
                         option("За сегодня", "${plural(c.today, "снимок", "снимка", "снимков")} и отчёт", enabled = c.today > 0) {
-                            zip(Inventory.startOfDay(), " — " + DAY_SHORT.format(System.currentTimeMillis()))
+                            zip(Platform.startOfDay(), " — " + DAY_SHORT.format(Platform.nowMs()))
                         }
                     }
                 }
@@ -483,8 +488,8 @@ private fun ExportDialog(obj: File, onClose: () -> Unit) {
     )
 }
 
-private val WHEN_SHORT = java.text.SimpleDateFormat("dd.MM HH:mm", Locale.forLanguageTag("ru"))
-private val DAY_SHORT = java.text.SimpleDateFormat("dd.MM.yyyy", Locale.forLanguageTag("ru"))
+private object WHEN_SHORT { fun format(ms: Long) = Platform.format(ms, "dd.MM HH:mm") }
+private object DAY_SHORT { fun format(ms: Long) = Platform.format(ms, "dd.MM.yyyy") }
 
 /**
  * Как идёт разбор описи: шкала, доля и что делается («Читаем лист «Опись»» → «Ищем столбцы» →
@@ -515,14 +520,4 @@ fun ParseProgress(dir: File?, modifier: Modifier = Modifier, compact: Boolean = 
 }
 
 
-/** Файл описи из выбранной книги — в эту папку (заменяет прежний: одна опись на папку). */
-private fun importFile(context: android.content.Context, uri: Uri, obj: File): File {
-    Inventory.attachBook(context, uri, displayName(context, uri), obj)
-    return Inventory.fileIn(obj)!!
-}
-
-fun displayName(context: android.content.Context, uri: Uri): String =
-    context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
-        if (c.moveToFirst()) c.getString(0) else null
-    } ?: "опись.xlsx"
 

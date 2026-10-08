@@ -1,6 +1,12 @@
 package kg.osmotr.core
 
 import kotlinx.cinterop.ExperimentalForeignApi
+import kotlinx.cinterop.addressOf
+import kotlinx.cinterop.alloc
+import kotlinx.cinterop.ptr
+import kotlinx.cinterop.reinterpret
+import kotlinx.cinterop.sizeOf
+import kotlinx.cinterop.usePinned
 import kotlinx.cinterop.useContents
 import okio.FileSystem
 import okio.Path.Companion.toPath
@@ -38,6 +44,30 @@ actual fun unzip(bytes: ByteArray): Map<String, ByteArray> = runCatching {
         out
     } finally { FileSystem.SYSTEM.delete(tmp) }
 }.getOrDefault(emptyMap())
+
+@OptIn(ExperimentalForeignApi::class)
+actual fun deflateRaw(bytes: ByteArray): ByteArray? = runCatching {
+    kotlinx.cinterop.memScoped {
+        val strm = alloc<platform.zlib.z_stream>()
+        // −15 — без обёртки zlib (сырой deflate, как в zip).
+        if (platform.zlib.deflateInit2_(strm.ptr, 6, platform.zlib.Z_DEFLATED, -15, 8, platform.zlib.Z_DEFAULT_STRATEGY,
+                platform.zlib.ZLIB_VERSION, sizeOf<platform.zlib.z_stream>().toInt()) != platform.zlib.Z_OK) return@memScoped null
+        val bound = platform.zlib.deflateBound(strm.ptr, bytes.size.toULong()).toInt() + 64
+        val out = ByteArray(bound)
+        val n = bytes.usePinned { src ->
+            out.usePinned { dst ->
+                strm.next_in = src.addressOf(0).reinterpret()
+                strm.avail_in = bytes.size.toUInt()
+                strm.next_out = dst.addressOf(0).reinterpret()
+                strm.avail_out = bound.toUInt()
+                val r = platform.zlib.deflate(strm.ptr, platform.zlib.Z_FINISH)
+                platform.zlib.deflateEnd(strm.ptr)
+                if (r != platform.zlib.Z_STREAM_END) -1 else strm.total_out.toInt()
+            }
+        }
+        if (n < 0) null else out.copyOf(n)
+    }
+}.getOrNull()
 
 @kotlin.native.concurrent.ThreadLocal
 private object Memo { val map = HashMap<String, Int>() }
