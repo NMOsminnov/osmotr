@@ -82,11 +82,12 @@ jobs:
       - name: Все экраны на симуляторе — снимки
         run: |
           mkdir -p shots
-          shot() {  # имя, ожидание, параметры запуска
+          shot() {  # имя, ожидание, параметры запуска; вывод приложения (ошибки Kotlin) — рядом со снимком
             local name=$1 wait=$2; shift 2
-            xcrun simctl launch --terminate-running-process "$DEVICE" kg.osmotr.app "$@" > /dev/null
+            xcrun simctl launch --terminate-running-process --stdout="$PWD/shots/$name.out" --stderr="$PWD/shots/$name.err" "$DEVICE" kg.osmotr.app "$@" > /dev/null
             sleep "$wait"
             xcrun simctl io "$DEVICE" screenshot "shots/$name.png" > /dev/null
+            if ! xcrun simctl spawn "$DEVICE" launchctl list | grep -q kg.osmotr.app; then echo "::error::$name — приложение закрылось"; tail -40 "shots/$name.err" || true; fi
           }
           shot 01-главный 12
           shot 02-опись 12 -screen inventory -path "Склад"
@@ -97,6 +98,12 @@ jobs:
           shot 07-дерево 8 -screen tree
           shot 08-контакты 8 -screen contacts -path "Склад/1. 777∕1001"
           shot 09-обычная-папка 8 -screen folder -path "Насосная/Насос 1"
+          shot 10-папка-описи 8 -screen folder -path "Склад"
+          shot 11-папка-с-папками 8 -screen folder -path "Насосная"
+          shot 12-главный-снова 12
+          # Отчёты о сбоях iOS — в результаты.
+          find ~/Library/Logs/DiagnosticReports -name "Osmotr*" -newer xcodebuild-sim.log -exec cp {} shots/ \; 2>/dev/null || true
+          ls shots/*.ips 2>/dev/null && head -c 3000 shots/*.ips | head -60 || echo "отчётов о сбоях нет"
           xcrun simctl spawn "$DEVICE" log show --last 5m --predicate 'process == "Osmotr"' --style compact > shots/log.txt || true
           grep -iE "osmotr:|crash|fatal" shots/log.txt | tail -20 || true
       - uses: actions/upload-artifact@v4

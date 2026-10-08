@@ -93,7 +93,7 @@ private class InventoryView {
 }
 private val views = HashMap<File, InventoryView>()
 
-private enum class Sort(val title: String) { NUMBER("№"), PRIORITY("Приоритет"), COST("Стоимость") }
+private enum class Sort(val title: String) { NUMBER("по №"), PRIORITY("по приоритету"), COST("по стоимости") }
 
 /** «1 044 321,55» — деньги по-русски: тысячи через пробел, два знака после запятой. */
 fun money(v: Double?): String {
@@ -317,7 +317,7 @@ fun InventoryScreen(obj: File, into: File? = null, initialQuery: String? = null,
                     Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         // Порядок — одной кнопкой: касание — следующий (№ → приоритет → стоимость).
                         if (v.query.isBlank()) FilterChip(true, { v.sort = Sort.entries[(v.sort.ordinal + 1) % Sort.entries.size] },
-                            { Text("↕ " + v.sort.title) })
+                            { Text(v.sort.title) })  // стрелку «↕» iPhone рисует смайликом
                         FilterChip(v.onlyLeft, { v.onlyLeft = !v.onlyLeft }, { Text("Не осмотрено") })
                         val lists = all.map { it.list }.distinct()
                         if (lists.size > 1) lists.forEach { l -> FilterChip(v.list == l, { v.list = if (v.list == l) null else l }, { Text(l) }) }

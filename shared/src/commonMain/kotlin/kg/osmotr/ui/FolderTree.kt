@@ -94,7 +94,7 @@ class Tree(
             fun walk(dir: File): Pair<Int, Int> {
                 val kids = Store.foldersIn(dir)
                 children[dir] = kids
-                if (File(dir, Store.NOTE).isFile) notes += dir
+                if (File(dir, Store.NOTE).length() > 0 && Store.note(dir) != null) notes += dir  // пустой файл — не комментарий
                 if (File(dir, Store.CONTACTS).isFile) contacts += dir
                 var p = dir.listFiles()?.count(Store::isPhoto) ?: 0
                 var f = kids.size
@@ -274,7 +274,7 @@ fun FolderTree(
                     val np = t.photos[r.dir] ?: 0
                     if (nf > 0) Count(AppIcons.Folder, nf, "папок внутри")
                     if (np > 0) Count(AppIcons.PhotoLibrary, np, "снимков внутри")
-                    else Text("пусто", style = MaterialTheme.typography.labelMedium, color = dim.copy(alpha = 0.5f))
+                    else Text("пусто", Modifier.padding(start = if (nf > 0) 8.dp else 0.dp), style = MaterialTheme.typography.labelMedium, color = dim.copy(alpha = 0.5f))
                 }
             }
         }
