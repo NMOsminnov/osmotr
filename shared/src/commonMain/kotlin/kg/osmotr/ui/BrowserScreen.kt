@@ -28,6 +28,10 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -414,7 +418,12 @@ private fun Breadcrumbs(dir: File, goTo: (File) -> Unit) {
     // Путь длиннее строки — видна его конечная часть: текущая папка.
     val scroll = rememberScrollState()
     LaunchedEffect(dir, scroll.maxValue) { scroll.scrollTo(scroll.maxValue) }
-    Row(Modifier.horizontalScroll(scroll), verticalAlignment = Alignment.CenterVertically) {
+    // Обрезанное слева — растворяется, а не рубится посреди слова.
+    val fade = Modifier.graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }.drawWithContent {
+        drawContent()
+        if (scroll.value > 0) drawRect(Brush.horizontalGradient(0f to Color.Transparent, 32.dp.toPx() / size.width to Color.Black), blendMode = BlendMode.DstIn)
+    }
+    Row(fade.horizontalScroll(scroll), verticalAlignment = Alignment.CenterVertically) {
         chain.forEachIndexed { i, d ->
             if (i > 0) Text(" › ", color = MaterialTheme.colorScheme.onSurfaceVariant)
             val last = i == chain.lastIndex

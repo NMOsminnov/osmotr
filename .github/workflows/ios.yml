@@ -87,7 +87,9 @@ jobs:
             xcrun simctl launch --terminate-running-process --stdout="$PWD/shots/$name.out" --stderr="$PWD/shots/$name.err" "$DEVICE" kg.osmotr.app "$@" > /dev/null
             sleep "$wait"
             xcrun simctl io "$DEVICE" screenshot "shots/$name.png" > /dev/null
-            if ! xcrun simctl spawn "$DEVICE" launchctl list | grep -q kg.osmotr.app; then echo "::error::$name — приложение закрылось"; tail -40 "shots/$name.err" || true; fi
+            # Список — сперва в переменную: «grep -q» под pipefail рвёт трубу (SIGPIPE) и врёт «закрылось».
+            local alive; alive=$(xcrun simctl spawn "$DEVICE" launchctl list || true)
+            if ! grep -q "UIKitApplication:kg.osmotr.app" <<< "$alive"; then echo "::error::$name — приложение закрылось"; tail -40 "shots/$name.err" || true; fi
           }
           shot 01-главный 12
           shot 02-опись 12 -screen inventory -path "Склад"
