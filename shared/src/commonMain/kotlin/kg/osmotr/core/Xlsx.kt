@@ -204,4 +204,92 @@ object Xlsx {
         val last = rows.keys.maxOrNull() ?: return emptyList()
         return (1..last).map { r -> rows[r]?.let { m -> List((m.keys.maxOrNull() ?: -1) + 1) { m[it].orEmpty() } } ?: emptyList() }
     }
+
+    // ---------- Запись ----------
+
+    /** Лист для записи: имя, ширины столбцов, строки (первая — заголовки). */
+    class Out(val name: String, val rows: List<List<Any?>>, val widths: List<Int> = emptyList(), val rowStyle: (Int) -> Int = { 0 })
+
+    /** Стили ячеек: обычный, жирный заголовок, зелёная строка (сделано), розовая (не сделано). */
+    const val PLAIN = 0; const val HEADER = 1; const val GREEN = 2; const val RED = 3
+
+    /** Один лист текста — контакты. */
+    fun write(file: File, rows: List<List<String>>) = writeBook(file, listOf(Out("Контакты", rows, listOf(32, 24, 20, 28, 40))))
+
+    /**
+     * Книга из нескольких листов. Текст — ячейками inlineStr (номера и телефоны не превращаются в
+     * числа), числа — числами (суммы складываются в Excel). Заголовок закреплён и с фильтром.
+     */
+    fun writeBook(file: File, sheets: List<Out>) = Store.writeDurably(file) { stream ->
+        val z = ZipWriter(stream)
+        fun put(name: String, text: String) = z.add(name, text.encodeToByteArray())
+        val names = uniqueNames(sheets.map { it.name })
+        val n = sheets.size
+        put("[Content_Types].xml", """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>""" +
+            (1..n).joinToString("") { """<Override PartName="/xl/worksheets/sheet$it.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>""" } +
+            """<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>""")
+        put("_rels/.rels", """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>""")
+        put("xl/workbook.xml", """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>""" +
+            names.mapIndexed { i, nm -> """<sheet name="${esc(nm)}" sheetId="${i + 1}" r:id="rId${i + 1}"/>""" }.joinToString("") + "</sheets></workbook>")
+        put("xl/_rels/workbook.xml.rels", """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">""" +
+            (1..n).joinToString("") { """<Relationship Id="rId$it" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet$it.xml"/>""" } +
+            """<Relationship Id="rId${n + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>""")
+        put("xl/styles.xml", """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font></fonts><fills count="4"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FFC6EFCE"/><bgColor indexed="64"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FFFFC7CE"/><bgColor indexed="64"/></patternFill></fill></fills><borders count="1"><border/></borders><cellStyleXfs count="1"><xf/></cellStyleXfs><cellXfs count="4"><xf xfId="0"/><xf xfId="0" fontId="1" applyFont="1"/><xf xfId="0" fillId="2" applyFill="1"/><xf xfId="0" fillId="3" applyFill="1"/></cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>""")
+        sheets.forEachIndexed { k, sh ->
+            val x = StringBuilder("""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>""")
+            if (sh.widths.isNotEmpty()) {
+                x.append("<cols>")
+                sh.widths.forEachIndexed { i, w -> x.append("""<col min="${i + 1}" max="${i + 1}" width="$w" customWidth="1"/>""") }
+                x.append("</cols>")
+            }
+            x.append("<sheetData>")
+            val width = sh.rows.maxOfOrNull { it.size } ?: 0
+            sh.rows.forEachIndexed { r, row ->
+                x.append("""<row r="${r + 1}">""")
+                val style = if (r == 0) HEADER else sh.rowStyle(r)
+                val s = if (style != PLAIN) """ s="$style"""" else ""
+                row.forEachIndexed { c, v ->
+                    val ref = "${col(c)}${r + 1}"
+                    when (v) {
+                        null -> if (s.isNotEmpty()) x.append("""<c r="$ref"$s/>""")
+                        is Number -> x.append("""<c r="$ref"$s><v>$v</v></c>""")
+                        else -> x.append("""<c r="$ref" t="inlineStr"$s><is><t xml:space="preserve">${esc(v.toString())}</t></is></c>""")
+                    }
+                }
+                x.append("</row>")
+            }
+            x.append("</sheetData>")
+            if (sh.rows.size > 1 && width > 0) x.append("""<autoFilter ref="A1:${col(width - 1)}${sh.rows.size}"/>""")
+            x.append("</worksheet>")
+            put("xl/worksheets/sheet${k + 1}.xml", x.toString())
+        }
+        // Запись целиком, сброс на диск, потом подмена (Store.writeDurably): оборванная
+        // запись не портит прежний файл.
+        z.finish()
+    }
+
+    /** Имена листов по правилам Excel: до 31 знака, без []:*?/\, без повторов. */
+    private fun uniqueNames(names: List<String>): List<String> {
+        val used = HashSet<String>()
+        return names.map { raw ->
+            val base = raw.replace(Regex("""[\[\]:*?/\\]"""), " ").trim().ifEmpty { "Лист" }.take(28)
+            var name = base; var i = 2
+            while (!used.add(name.lowercase())) name = "$base ${i++}"
+            name
+        }
+    }
+
+
+    private fun col(i: Int): String { var n = i + 1; val s = StringBuilder(); while (n > 0) { s.insert(0, 'A' + (n - 1) % 26); n = (n - 1) / 26 }; return s.toString() }
+    private fun esc(s: String) = s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;")
+        .filter { it == '\t' || it == '\n' || it >= ' ' }
+
+    /** Строки первого листа книги-файла (контакты). */
+    fun read(file: File): List<List<String>> = runCatching { sheets(file.readBytes()).firstOrNull()?.rows }.getOrNull().orEmpty()
 }
