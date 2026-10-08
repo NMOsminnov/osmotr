@@ -80,7 +80,12 @@ object IosHost : Host {
 
     private val camera = object : NSObject(), UIImagePickerControllerDelegateProtocol, UINavigationControllerDelegateProtocol {
         override fun imagePickerController(picker: UIImagePickerController, didFinishPickingMediaWithInfo: Map<Any?, *>) {
-            (didFinishPickingMediaWithInfo[UIImagePickerControllerOriginalImage] as? UIImage)?.let(::saveJpeg)
+            (didFinishPickingMediaWithInfo[UIImagePickerControllerOriginalImage] as? UIImage)?.let { img ->
+                saveJpeg(img)
+                // Страховка: копия в «Фото» (разрешение — только «добавлять»; в чужие снимки не смотрим).
+                // Удалили приложение по ошибке — снимки осмотра остались в галерее.
+                platform.UIKit.UIImageWriteToSavedPhotosAlbum(img, null, null, null)
+            }
             // Серия: снимок лёг — камера сразу снова (как штатная камера на Android).
             picker.dismissViewControllerAnimated(false) { openCamera() }
         }

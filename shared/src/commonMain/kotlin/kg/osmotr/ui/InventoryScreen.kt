@@ -112,13 +112,14 @@ fun money(v: Double?): String {
  */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
-fun InventoryScreen(obj: File, into: File? = null, openFolder: (File) -> Unit, folders: (File) -> Unit, close: () -> Unit,
+fun InventoryScreen(obj: File, into: File? = null, initialQuery: String? = null, openFolder: (File) -> Unit, folders: (File) -> Unit, close: () -> Unit,
                     picked: (File) -> Unit = {}) {
     val host = LocalHost.current
     val scope = rememberCoroutineScope()
     val keyboard = LocalSoftwareKeyboardController.current
     // Набор в папку — свой список с начала (сверху — что уже в ней), опись помнит своё место.
     val v = remember(obj, into) { if (into != null) InventoryView() else views.getOrPut(obj) { InventoryView() } }
+    LaunchedEffect(initialQuery) { initialQuery?.let { v.query = it } }
     val version by Store.version.collectAsStateWithLifecycle()
     var reparse by remember { mutableStateOf(0) }
     data class Data(val parsed: List<Inventory.Parsed>, val status: Inventory.Status)

@@ -61,8 +61,8 @@ import kotlinx.coroutines.withContext
 
 /** Поиск папок: поле с клавиатурой сразу, результаты по мере набора; касание — в папку. */
 @Composable
-fun SearchScreen(here: File, open: (File) -> Unit, close: () -> Unit) {
-    var query by rememberSaveable { mutableStateOf("") }
+fun SearchScreen(here: File, initial: String = "", open: (File) -> Unit, close: () -> Unit) {
+    var query by rememberSaveable { mutableStateOf(initial) }
     val index by produceState<List<Search.Entry>?>(null) { value = withContext(Dispatchers.IO) { Search.index() } }
     val itemIndex by produceState<List<Search.ItemEntry>>(emptyList()) { value = withContext(Dispatchers.IO) { runCatching { Search.items() }.getOrDefault(emptyList()) } }
     val itemHits by produceState(emptyList<Search.ItemEntry>(), itemIndex, query) {

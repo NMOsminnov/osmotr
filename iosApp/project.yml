@@ -13,9 +13,16 @@ targets:
       path: iosApp/Info.plist
       properties:
         CFBundleDisplayName: Осмотр
-        CFBundleShortVersionString: "2.5"
+        CFBundleShortVersionString: "2.6"
         CFBundleVersion: "1"
-        UILaunchScreen: {}
+        UILaunchScreen:
+          UIColorName: LaunchBackground
+        # «Открыть в «Осмотр»» и «Поделиться» из WhatsApp, «Файлов», почты: опись Excel.
+        CFBundleDocumentTypes:
+          - CFBundleTypeName: Опись Excel
+            CFBundleTypeRole: Viewer
+            LSHandlerRank: Alternate
+            LSItemContentTypes: [org.openxmlformats.spreadsheetml.sheet, com.microsoft.excel.xls]
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
         # Разрешения — по одному, когда нужны, и с честной подписью (App Review 5.1.1).
         NSCameraUsageDescription: Снимки оборудования при осмотре
@@ -27,8 +34,9 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: kg.osmotr.app
-        MARKETING_VERSION: "2.5"
+        MARKETING_VERSION: "2.6"
         CURRENT_PROJECT_VERSION: "1"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         CODE_SIGNING_ALLOWED: "NO"
         CODE_SIGNING_REQUIRED: "NO"
         ENABLE_USER_SCRIPT_SANDBOXING: "NO"

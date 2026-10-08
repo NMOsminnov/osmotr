@@ -52,11 +52,11 @@ object ToastBus {
 sealed interface Screen {
     data class Browser(val dir: File) : Screen
     data class Viewer(val dir: File, val start: File) : Screen
-    data class Search(val here: File) : Screen
+    data class Search(val here: File, val query: String? = null) : Screen
     data class Contacts(val dir: File) : Screen
     data class Tree(val here: File) : Screen
     /** [into] — набираем предметы в эту папку (касание — добавить/убрать). */
-    data class Inventory(val obj: File, val into: File? = null) : Screen
+    data class Inventory(val obj: File, val into: File? = null, val query: String? = null) : Screen
 }
 
 /**
@@ -64,19 +64,19 @@ sealed interface Screen {
  * «Поделиться») и [incoming] — описи, присланные через «Поделиться» / «Открыть с помощью».
  */
 @Composable
-fun OsmotrApp(host: Host, incoming: SnapshotStateList<Picked>) {
+fun OsmotrApp(host: Host, incoming: SnapshotStateList<Picked>, start: List<Screen> = emptyList()) {
     MaterialTheme(colorScheme = darkColorScheme(
         primary = Color(0xFF2F81F7), onPrimary = Color.White, secondary = Color(0xFFFFC857),
         background = Color(0xFF0E1116), surface = Color(0xFF161B22), surfaceVariant = Color(0xFF21262D),
     )) {
         Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-            CompositionLocalProvider(LocalHost provides host) { Body(host, incoming) }
+            CompositionLocalProvider(LocalHost provides host) { Body(host, incoming, start) }
         }
     }
 }
 
 @Composable
-private fun Body(host: Host, incoming: SnapshotStateList<Picked>) {
+private fun Body(host: Host, incoming: SnapshotStateList<Picked>, start: List<Screen>) {
     var canWrite by remember { mutableStateOf(host.canWrite()) }
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { canWrite = host.canWrite() }
     if (!canWrite) {
@@ -85,7 +85,7 @@ private fun Body(host: Host, incoming: SnapshotStateList<Picked>) {
     }
     Store.ensureRoot()
 
-    val stack = remember { mutableStateListOf<Screen>(Screen.Browser(Store.root)) }
+    val stack = remember { mutableStateListOf<Screen>(Screen.Browser(Store.root)).apply { addAll(start) } }
     val scope = rememberCoroutineScope()
     // Присланные описи — на главный, загрузка с окном прогресса.
     LaunchedEffect(incoming.size) {
@@ -156,8 +156,8 @@ private fun Body(host: Host, incoming: SnapshotStateList<Picked>) {
                 back = if (stack.size > 1) ({ pop() }) else null,
             )
             // Найденное открывается вместо поиска: «назад» — туда, откуда искали.
-            is Screen.Search -> SearchScreen(here = top.here, open = { replaceTop(Screen.Browser(it)) }, close = { pop() })
-            is Screen.Inventory -> InventoryScreen(obj = top.obj, into = top.into, openFolder = { push(Screen.Browser(it)) },
+            is Screen.Search -> SearchScreen(here = top.here, initial = top.query.orEmpty(), open = { replaceTop(Screen.Browser(it)) }, close = { pop() })
+            is Screen.Inventory -> InventoryScreen(obj = top.obj, into = top.into, initialQuery = top.query, openFolder = { push(Screen.Browser(it)) },
                 folders = { push(Screen.Browser(it)) }, close = { pop() },
                 // Папка после набора могла переименоваться — вернуться в неё по новому имени.
                 picked = { dir -> pop(); replaceTop(Screen.Browser(dir)) })
