@@ -15,3 +15,5 @@ dependencyResolutionManagement {
 }
 rootProject.name = "osmotr"
 include(":app")
+// Общее для Android и iPhone: описи, Excel, поиск, интерфейс (Kotlin Multiplatform + Compose Multiplatform).
+include(":shared")

@@ -1,0 +1,42 @@
+# Проект Xcode для iPhone — описанием (XcodeGen собирает .xcodeproj на macOS, в CI).
+name: Osmotr
+options:
+  bundleIdPrefix: kg.osmotr
+  deploymentTarget:
+    iOS: "16.0"
+targets:
+  Osmotr:
+    type: application
+    platform: iOS
+    sources: [iosApp]
+    info:
+      path: iosApp/Info.plist
+      properties:
+        CFBundleDisplayName: Осмотр
+        CFBundleShortVersionString: "2.5"
+        CFBundleVersion: "1"
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+        # Разрешения — по одному, когда нужны, и с честной подписью (App Review 5.1.1).
+        NSCameraUsageDescription: Снимки оборудования при осмотре
+        NSPhotoLibraryAddUsageDescription: Копия снимков осмотра в альбоме «Осмотры», чтобы не потерять
+        # Папка приложения видна в «Файлах» («На iPhone → Осмотр») и через кабель на компьютере.
+        UIFileSharingEnabled: true
+        LSSupportsOpeningDocumentsInPlace: true
+        CADisableMinimumFrameDurationOnPhone: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: kg.osmotr.app
+        MARKETING_VERSION: "2.5"
+        CURRENT_PROJECT_VERSION: "1"
+        CODE_SIGNING_ALLOWED: "NO"
+        CODE_SIGNING_REQUIRED: "NO"
+        ENABLE_USER_SCRIPT_SANDBOXING: "NO"
+        FRAMEWORK_SEARCH_PATHS: "$(SRCROOT)/../shared/build/xcode-frameworks/$(CONFIGURATION)/$(SDK_NAME)"
+        OTHER_LDFLAGS: ["$(inherited)", "-framework", "Shared"]
+    preBuildScripts:
+      - name: Kotlin (общий модуль)
+        basedOnDependencyAnalysis: false
+        script: |
+          cd "$SRCROOT/.."
+          ./gradlew :shared:embedAndSignAppleFrameworkForXcode

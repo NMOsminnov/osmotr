@@ -1,0 +1,69 @@
+# iPhone без своего Mac: облачный macOS собирает приложение, запускает на симуляторе, снимает
+# экран и собирает IPA без подписи (ставится через SideStore, подпись — Apple ID человека).
+name: iPhone
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ["shared/**", "iosApp/**", ".github/workflows/ios.yml", "gradle/**", "*.gradle.kts", "gradle.properties"]
+
+concurrency:
+  group: ios-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Кэш Kotlin/Native
+        uses: actions/cache@v4
+        with:
+          path: ~/.konan
+          key: konan-${{ runner.os }}-${{ hashFiles('gradle/libs.versions.toml') }}
+      - name: Тесты общего кода (описи, поиск)
+        run: ./gradlew :shared:jvmTest --no-configuration-cache
+      - name: Проект Xcode
+        run: |
+          brew install xcodegen
+          cd iosApp && xcodegen generate
+      - name: Сборка под симулятор
+        run: |
+          xcodebuild -project iosApp/Osmotr.xcodeproj -scheme Osmotr -configuration Debug \
+            -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath build/sim CODE_SIGNING_ALLOWED=NO build | tail -40
+      - name: Запуск на симуляторе и снимки экрана
+        run: |
+          mkdir -p shots
+          DEVICE=$(xcrun simctl list devices available -j | python3 -c "import json,sys; d=json.load(sys.stdin)['devices']; print(next(x['udid'] for k in sorted(d, reverse=True) if 'iOS' in k for x in d[k] if x['name'].startswith('iPhone')))")
+          xcrun simctl boot "$DEVICE"
+          xcrun simctl bootstatus "$DEVICE" -b
+          APP=$(find build/sim -name "Osmotr.app" -type d | head -1)
+          xcrun simctl install "$DEVICE" "$APP"
+          xcrun simctl launch "$DEVICE" kg.osmotr.app
+          sleep 15
+          xcrun simctl io "$DEVICE" screenshot shots/01-опись.png
+          xcrun simctl spawn "$DEVICE" log show --last 2m --predicate 'process == "Osmotr"' --style compact > shots/log.txt || true
+      - name: IPA без подписи (для SideStore)
+        run: |
+          xcodebuild -project iosApp/Osmotr.xcodeproj -scheme Osmotr -configuration Release \
+            -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build/dev \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build | tail -20
+          APP=$(find build/dev -name "Osmotr.app" -type d | head -1)
+          mkdir -p ipa/Payload && cp -R "$APP" ipa/Payload/
+          (cd ipa && zip -qry ../Osmotr.ipa Payload)
+          ls -la Osmotr.ipa
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: iphone-${{ github.run_number }}
+          path: |
+            shots/
+            Osmotr.ipa
