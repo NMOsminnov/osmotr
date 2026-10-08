@@ -31,4 +31,5 @@ actual object Platform {
     }.timeInMillis
     actual fun scan(paths: List<String>) {}
     actual fun makeThumb(photo: String, out: String, px: Int): Boolean = false
+    actual fun log(msg: String) = println("osmotr: $msg")
 }

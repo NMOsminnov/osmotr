@@ -21,4 +21,6 @@ expect object Platform {
     fun scan(paths: List<String>)
     /** Превью снимка ~[px] по меньшей стороне, повёрнутое по EXIF, JPEG. Не вышло — false. */
     fun makeThumb(photo: String, out: String, px: Int): Boolean
+    /** Строка в системный журнал (Android — logcat, iPhone — консоль): для разбора медленного и ошибок. */
+    fun log(msg: String)
 }

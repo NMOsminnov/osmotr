@@ -55,4 +55,5 @@ actual object Platform {
         bmp.recycle()
         true
     }.getOrDefault(false)
+    actual fun log(msg: String) { android.util.Log.i("osmotr", msg) }
 }

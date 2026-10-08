@@ -98,4 +98,5 @@ actual object Platform {
         File(out).parentFile?.mkdirs()
         return data.writeToFile(out, atomically = true)
     }
+    actual fun log(msg: String) = platform.Foundation.NSLog("osmotr: %@", msg)
 }

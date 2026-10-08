@@ -595,12 +595,17 @@ object Inventory {
 
     private fun parseFresh(f: File, cache: File): Parsed {
         tell(f, 0f, "Открываем файл")
+        var t = Platform.nowMs(); val times = StringBuilder()
+        fun lap(what: String) { val now = Platform.nowMs(); times.append(" $what ${now - t}"); t = now }
+        val book = f.readBytes(); lap("чтение")
         // Чтение — 85 % шкалы, поиск столбцов и строк — остальное.
-        val sheets = Xlsx.sheets(f.readBytes(), progress = { part, sheet -> tell(f, 0.85f * part, "Читаем лист «$sheet»") })
+        val sheets = Xlsx.sheets(book, progress = { part, sheet -> tell(f, 0.85f * part, "Читаем лист «$sheet»") }); lap("листы")
         tell(f, 0.88f, "Ищем столбцы")
-        val items = sheets.flatMap { s -> detect(s)?.let { items(s, it) }.orEmpty() }
+        val tables = sheets.mapNotNull { s -> detect(s)?.let { s to it } }; lap("столбцы")
+        val items = tables.flatMap { (s, tb) -> items(s, tb) }; lap("предметы")
         tell(f, 0.97f, "Собираем список: ${items.size} предметов")
-        runCatching { cache.parentFile?.mkdirs(); cache.writeText(json.encodeToString(Cached.serializer(), Cached(items))) }
+        runCatching { cache.parentFile?.mkdirs(); cache.writeText(json.encodeToString(Cached.serializer(), Cached(items))) }; lap("кэш")
+        Platform.log("разбор ${f.name}: ${items.size} предметов, мс:$times")
         return Parsed(f, items)
     }
 

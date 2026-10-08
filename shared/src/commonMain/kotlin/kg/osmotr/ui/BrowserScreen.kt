@@ -8,6 +8,7 @@ import kg.osmotr.core.Platform
 import kg.osmotr.core.Search
 import kg.osmotr.core.Store
 import kg.osmotr.core.Xlsx
+import okio.Path.Companion.toPath
 import kotlinx.coroutines.IO
 
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -444,7 +445,7 @@ private fun FolderCard(tile: Store.FolderTile, selected: Boolean, onClick: () ->
     Box(Modifier.aspectRatio(1f).clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceVariant).clickable(onClick = onClick)) {
         tile.cover?.let { cover ->
             AsyncImage(
-                ImageRequest.Builder(coil3.compose.LocalPlatformContext.current).data(Store.thumbOrPhoto(cover)).size(Store.THUMB_PX).build(),
+                ImageRequest.Builder(coil3.compose.LocalPlatformContext.current).data(Store.thumbOrPhoto(cover).path.toPath()).size(Store.THUMB_PX).build(),
                 contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize(),
             )
         }
@@ -605,7 +606,7 @@ private fun PhotoCell(photo: File, selected: Boolean, modifier: Modifier) {
     val host = LocalHost.current
     Box(modifier.aspectRatio(1f).clip(RoundedCornerShape(6.dp)).background(MaterialTheme.colorScheme.surfaceVariant)) {
         AsyncImage(
-            ImageRequest.Builder(coil3.compose.LocalPlatformContext.current).data(Store.thumbOrPhoto(photo)).size(Store.THUMB_PX).build(),
+            ImageRequest.Builder(coil3.compose.LocalPlatformContext.current).data(Store.thumbOrPhoto(photo).path.toPath()).size(Store.THUMB_PX).build(),
             contentDescription = photo.name, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize(),
         )
         if (selected) {
