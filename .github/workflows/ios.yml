@@ -1,10 +1,11 @@
-# iPhone без своего Mac: облачный macOS собирает приложение, запускает на симуляторе, снимает
-# экран и собирает IPA без подписи (ставится через SideStore, подпись — Apple ID человека).
+# iPhone без своего Mac: облачный macOS собирает приложение, проверяет все экраны на симуляторе
+# (пробная опись и снимки — прямо в папку приложения, экран — параметром запуска) и собирает IPA
+# без подписи (ставится через SideStore, подпись — Apple ID человека). Симулятор и IPA — на
+# двух машинах параллельно: прогон длится столько, сколько самая долгая часть, а не их сумма.
 name: iPhone
 
 on:
-  # IPA (выпускная сборка — самая долгая) — только по кнопке или метке версии «v…»;
-  # на каждую отправку — тесты, симулятор и снимки экрана.
+  # IPA (выпускная сборка — самая долгая) — только по кнопке или метке версии «v…».
   workflow_dispatch:
     inputs:
       ipa:
@@ -25,7 +26,89 @@ defaults:
     shell: bash -eo pipefail {0}
 
 jobs:
-  build:
+  simulator:
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      # Симулятор грузится минуты — запускаем сразу, пока идёт сборка.
+      - name: Симулятор — загрузка заранее
+        run: |
+          DEVICE=$(xcrun simctl list devices available -j | python3 -c "import json,sys; d=json.load(sys.stdin)['devices']; print(next(x['udid'] for k in sorted(d, reverse=True) if 'iOS' in k for x in d[k] if x['name'].startswith('iPhone')))")
+          echo "DEVICE=$DEVICE" >> "$GITHUB_ENV"
+          xcrun simctl boot "$DEVICE"
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Кэш Kotlin/Native
+        uses: actions/cache@v4
+        with:
+          path: ~/.konan
+          key: konan-${{ runner.os }}-${{ hashFiles('gradle/libs.versions.toml') }}
+      - name: Память сборке (облачный Mac — 7 ГБ)
+        run: |
+          sed -i '' 's/^org.gradle.jvmargs=.*/org.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=1g -XX:+UseParallelGC -Dfile.encoding=UTF-8/' gradle.properties
+          echo "kotlin.native.jvmArgs=-Xmx4g" >> gradle.properties
+      - name: Тесты общего кода (описи, поиск, хранилище)
+        run: ./gradlew :shared:jvmTest --no-configuration-cache
+      - name: Проект Xcode
+        run: |
+          brew install xcodegen
+          cd iosApp && xcodegen generate
+      - name: Сборка под симулятор
+        run: |
+          xcodebuild -project iosApp/Osmotr.xcodeproj -scheme Osmotr -configuration Debug \
+            -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath build/sim ARCHS=arm64 ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO build > xcodebuild-sim.log 2>&1 \
+            || { grep -E "error|e: |What went wrong|FAILED" -A3 xcodebuild-sim.log | head -80; exit 1; }
+          grep -E "BUILD SUCCEEDED" xcodebuild-sim.log
+      - name: Пробная опись и снимки — в папку приложения
+        run: |
+          xcrun simctl bootstatus "$DEVICE" -b > /dev/null
+          xcrun simctl install "$DEVICE" build/sim/Build/Products/Debug-iphonesimulator/Osmotr.app
+          # Первый запуск создаёт папку приложения.
+          xcrun simctl launch "$DEVICE" kg.osmotr.app; sleep 5; xcrun simctl terminate "$DEVICE" kg.osmotr.app || true
+          DOCS="$(xcrun simctl get_app_container "$DEVICE" kg.osmotr.app data)/Documents/Осмотры"
+          mkdir -p "$DOCS/Склад/1. 777∕1001"
+          cp shared/src/jvmTest/resources/templates/15-place-qty.xlsx "$DOCS/Склад/Опись — Склад.xlsx"
+          printf '777/1001\n' > "$DOCS/Склад/1. 777∕1001/Инвентарники.txt"
+          printf 'Шильдик читается, корпус целый.\n' > "$DOCS/Склад/1. 777∕1001/Комментарий.txt"
+          for n in 1 2 3; do sips -s format jpeg iosApp/iosApp/Assets.xcassets/AppIcon.appiconset/icon-1024.png --out "$DOCS/Склад/1. 777∕1001/1. 777∕1001_20261008_10000${n}_001.jpg" > /dev/null; done
+          mkdir -p "$DOCS/Насосная/Насос 1"
+          sips -s format jpeg iosApp/iosApp/Assets.xcassets/AppIcon.appiconset/icon-1024.png --out "$DOCS/Насосная/Насос 1/Насос 1_20261008_110000_001.jpg" > /dev/null
+          find "$DOCS" | head -30
+      - name: Все экраны на симуляторе — снимки
+        run: |
+          mkdir -p shots
+          shot() {  # имя, ожидание, параметры запуска
+            local name=$1 wait=$2; shift 2
+            xcrun simctl launch --terminate-running-process "$DEVICE" kg.osmotr.app "$@" > /dev/null
+            sleep "$wait"
+            xcrun simctl io "$DEVICE" screenshot "shots/$name.png" > /dev/null
+          }
+          shot 01-главный 12
+          shot 02-опись 12 -screen inventory -path "Склад"
+          shot 03-опись-поиск 8 -screen inventory -path "Склад" -query "сервер"
+          shot 04-папка-предмета 8 -screen folder -path "Склад/1. 777∕1001"
+          shot 05-просмотр 8 -screen view -path "Склад/1. 777∕1001/1. 777∕1001_20261008_100001_001.jpg"
+          shot 06-поиск 8 -screen search -query "насос"
+          shot 07-дерево 8 -screen tree
+          shot 08-контакты 8 -screen contacts -path "Склад/1. 777∕1001"
+          shot 09-обычная-папка 8 -screen folder -path "Насосная/Насос 1"
+          xcrun simctl spawn "$DEVICE" log show --last 5m --predicate 'process == "Osmotr"' --style compact > shots/log.txt || true
+          grep -iE "osmotr:|crash|fatal" shots/log.txt | tail -20 || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: simulator-${{ github.run_number }}
+          path: |
+            shots/
+            xcodebuild-sim.log
+
+  ipa:
+    if: github.event_name == 'workflow_dispatch' && inputs.ipa || startsWith(github.ref, 'refs/tags/v')
     runs-on: macos-15
     timeout-minutes: 60
     steps:
@@ -40,37 +123,15 @@ jobs:
         with:
           path: ~/.konan
           key: konan-${{ runner.os }}-${{ hashFiles('gradle/libs.versions.toml') }}
-      - name: Память сборке (облачный Mac — 7 ГБ; Kotlin/Native в выпускной сборке прожорлив)
+      - name: Память сборке (облачный Mac — 7 ГБ; выпускная сборка Kotlin/Native прожорлива)
         run: |
           sed -i '' 's/^org.gradle.jvmargs=.*/org.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=1g -XX:+UseParallelGC -Dfile.encoding=UTF-8/' gradle.properties
           echo "kotlin.native.jvmArgs=-Xmx4g" >> gradle.properties
-      - name: Тесты общего кода (описи, поиск)
-        run: ./gradlew :shared:jvmTest --no-configuration-cache
       - name: Проект Xcode
         run: |
           brew install xcodegen
           cd iosApp && xcodegen generate
-      - name: Сборка под симулятор
-        run: |
-          xcodebuild -project iosApp/Osmotr.xcodeproj -scheme Osmotr -configuration Debug \
-            -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
-            -derivedDataPath build/sim ARCHS=arm64 ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO build > xcodebuild-sim.log 2>&1 \
-            || { grep -E "error|e: |What went wrong|FAILED" -A3 xcodebuild-sim.log | head -80; exit 1; }
-          grep -E "BUILD SUCCEEDED|BUILD SUCCESSFUL in" xcodebuild-sim.log
-      - name: Запуск на симуляторе и снимки экрана
-        run: |
-          mkdir -p shots
-          DEVICE=$(xcrun simctl list devices available -j | python3 -c "import json,sys; d=json.load(sys.stdin)['devices']; print(next(x['udid'] for k in sorted(d, reverse=True) if 'iOS' in k for x in d[k] if x['name'].startswith('iPhone')))")
-          xcrun simctl boot "$DEVICE"
-          xcrun simctl bootstatus "$DEVICE" -b
-          APP=build/sim/Build/Products/Debug-iphonesimulator/Osmotr.app
-          xcrun simctl install "$DEVICE" "$APP"
-          xcrun simctl launch "$DEVICE" kg.osmotr.app
-          sleep 15
-          xcrun simctl io "$DEVICE" screenshot shots/01-опись.png
-          xcrun simctl spawn "$DEVICE" log show --last 2m --predicate 'process == "Osmotr"' --style compact > shots/log.txt || true
       - name: IPA без подписи (для SideStore)
-        if: github.event_name == 'workflow_dispatch' && inputs.ipa || startsWith(github.ref, 'refs/tags/v')
         run: |
           xcodebuild -project iosApp/Osmotr.xcodeproj -scheme Osmotr -configuration Release \
             -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build/dev \
@@ -83,8 +144,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: iphone-${{ github.run_number }}
+          name: ipa-${{ github.run_number }}
           path: |
-            shots/
             Osmotr.ipa
-            xcodebuild-*.log
+            xcodebuild-ipa.log
