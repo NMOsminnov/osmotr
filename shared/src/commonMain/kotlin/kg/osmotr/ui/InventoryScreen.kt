@@ -658,8 +658,10 @@ private fun InventoryHead(scope2: List<Inventory.Item>, st: Inventory.Status?, v
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 val lists = all.map { it.list }.distinct().takeIf { it.size > 1 }.orEmpty()
                 val statuses = all.filter { v.list == null || it.list == v.list }.map { it.status }.filter { it.isNotEmpty() }.distinct().takeIf { it.size > 1 }.orEmpty()
-                if (lists.isNotEmpty()) MoreGroup("Список") { lists.forEach { l -> FilterChip(v.list == l, { v.list = if (v.list == l) null else l }, { Text(l) }, shape = androidx.compose.foundation.shape.CircleShape) } }
-                if (statuses.isNotEmpty()) MoreGroup("Статус") { statuses.forEach { s -> FilterChip(v.status == s, { v.status = if (v.status == s) null else s }, { Text(s) }, shape = androidx.compose.foundation.shape.CircleShape) } }
+                // «Список» — столбец «Статус» описи («Основной список», «Резерв»…), «Лист» — листы книги
+                // («Опись», «Вынесено») (автор, 09.10.2026: «Там не подразделения, а списки»).
+                if (statuses.isNotEmpty()) MoreGroup("Список") { statuses.forEach { s -> FilterChip(v.status == s, { v.status = if (v.status == s) null else s }, { Text(s) }, shape = androidx.compose.foundation.shape.CircleShape) } }
+                if (lists.isNotEmpty()) MoreGroup("Лист") { lists.forEach { l -> FilterChip(v.list == l, { v.list = if (v.list == l) null else l }, { Text(l) }, shape = androidx.compose.foundation.shape.CircleShape) } }
             }
         }
     }

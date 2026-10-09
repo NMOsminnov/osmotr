@@ -27,9 +27,13 @@ class TemplatesTest {
     @Test fun t01_осв_из_1с_шапка_в_два_этажа_группы_итоги() {
         val its = items("01-osv-1c.xlsx"); standard("01", its)
         assertEquals("сальдо на конец, дебет", 6900.0, its[0].sum!!, 0.01)
-        assertEquals("общий раздел 1С — не место", "", its[0].place)
+        assertEquals("раздел 1С — список, не место", "", its[0].place)
+        assertEquals("Основное подразделение", its[0].list)
         assertEquals("слово «подразделение» убирается", "Цех 2", Inventory.placeName("Подразделение: Цех 2"))
         assertEquals("Каб. 201", Inventory.placeName("Каб. 201"))
+        // Списки — приоритеты (автор): номер из названия раздела.
+        assertEquals("1", Inventory.priorityOfList("Список 1")); assertEquals("2", Inventory.priorityOfList("2 приоритет"))
+        assertEquals("3", Inventory.priorityOfList("Приоритет №3")); assertEquals("", Inventory.priorityOfList("Основное подразделение"))
     }
 
     @Test fun t02_инв1_три_этажа_нумерация_столбцов_повтор_шапки() {

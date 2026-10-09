@@ -381,17 +381,34 @@ object Inventory {
     }
     private val GENERIC_PLACES = setOf("", "основное", "главное", "общее", "основной", "основная")
 
-    /** Предметы листа по выбранным столбцам; итоги, повторы шапки, «1 2 3…» и пустые строки пропускаются, разделы — местом. */
+    /**
+     * Раздел описи — место или список. Похож на место («Здание 1», «Кабинет 101», «Каб. 201», «Цех 2»)
+     * — место; любой другой — список предметов, а список — это приоритет (автор, 09.10.2026: «Там не
+     * подразделения, а списки. Это приоритеты»).
+     */
+    private val PLACE_SECTION = Regex("""(?iu)^\s*(здани|корпус|кабинет|каб\.|каб\s|этаж|цех|комнат|помещени|склад|лаборатор|room|building|floor|office|block)""")
+
+    /** Номер приоритета из названия списка: «Список 1», «1 приоритет», «П2», «Приоритет №3». */
+    fun priorityOfList(name: String): String {
+        val n = name.trim()
+        Regex("""(?iu)(?:список|приоритет|п)\s*№?\s*(\d{1,2})\b""").find(n)?.let { return it.groupValues[1] }
+        Regex("""(?iu)^(\d{1,2})\s*[-–—.)]?\s*(?:список|приоритет)""").find(n)?.let { return it.groupValues[1] }
+        return ""
+    }
+
+    /** Предметы листа по выбранным столбцам; итоги, повторы шапки, «1 2 3…» и пустые строки пропускаются; разделы — местом или списком. */
     fun items(sheet: Xlsx.Sheet, t: Table): List<Item> {
         fun cell(r: List<String>, f: Field) = t.columns[f]?.let { r.getOrElse(it) { "" } }.orEmpty().trim()
         fun int(s: String) = number(s)?.takeIf(::whole)?.toLong()?.toString()
         val out = mutableListOf<Item>()
-        // Раздел прямо над шапкой («Здание 1») — место первых предметов.
-        var section = sheet.rows.getOrNull(t.headerRow - 1)?.let(::sectionOf).takeIf { t.headerRow > 0 }.orEmpty()
+        // Раздел прямо над шапкой («Здание 1», «Список 1») — место или список первых предметов.
+        var placeSection = ""; var listSection = ""
+        fun section(sec: String) { if (PLACE_SECTION.containsMatchIn(sec)) placeSection = sec else listSection = sec }
+        sheet.rows.getOrNull(t.headerRow - 1)?.let(::sectionOf)?.takeIf { t.headerRow > 0 }?.let(::section)
         for (i in t.body until sheet.rows.size) {
             val r = sheet.rows[i]
             // Раздел объединён на всю ширину — его текст и в столбце инвентарника.
-            sectionOf(r)?.let { sec -> cell(r, Field.INVENTORY).let { if (it.isEmpty() || it == sec) { section = sec; continue } } }
+            sectionOf(r)?.let { sec -> cell(r, Field.INVENTORY).let { if (it.isEmpty() || it == sec) { section(sec); continue } } }
             if (!dataRow(r, t.headers)) continue
             var inv = cell(r, Field.INVENTORY); var name = cell(r, Field.NAME)
             if (t.invFromName && inv.isEmpty()) INV_IN_NAME.find(name)?.let { m ->
@@ -401,12 +418,12 @@ object Inventory {
             if (inv.isEmpty() && name.none(Char::isLetter)) continue  // «01.01», «2» — не предмет
             val n = cell(r, Field.NUMBER).let { s -> int(s) ?: s }
             out += Item(
-                list = t.sheet, number = n.ifEmpty { (out.size + 1).toString() }, inventory = inv, name = name,
+                list = listSection.ifEmpty { t.sheet }, number = n.ifEmpty { (out.size + 1).toString() }, inventory = inv, name = name,
                 initial = number(cell(r, Field.INITIAL)), sum = number(cell(r, Field.SUM)),
-                priority = cell(r, Field.PRIORITY).let { s -> int(s) ?: priorityOf(s) },
+                priority = cell(r, Field.PRIORITY).let { s -> int(s) ?: priorityOf(s) }.ifEmpty { priorityOfList(listSection) },
                 status = cell(r, Field.LIST), row = i + 1,
                 qty = cell(r, Field.QUANTITY).let { s -> int(s) ?: s },
-                place = placeName(cell(r, Field.PLACE).ifEmpty { section }),
+                place = placeName(cell(r, Field.PLACE).ifEmpty { placeSection }),
             )
         }
         return out
@@ -593,7 +610,7 @@ object Inventory {
     @kotlinx.serialization.Serializable
     private class Cached(val items: List<Item>)
     private val json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
-    private fun cacheFile(f: File) = File(Store.cacheDir, "inventory/" + ("v5|" + f.absolutePath + "|" + f.length() + "|" + f.lastModified()).hashCode() + ".json")
+    private fun cacheFile(f: File) = File(Store.cacheDir, "inventory/" + ("v6|" + f.absolutePath + "|" + f.length() + "|" + f.lastModified()).hashCode() + ".json")
     private fun cached(f: File, cache: File): Parsed? = runCatching { if (cache.isFile) Parsed(f, json.decodeFromString<Cached>(cache.readText()).items) else null }.getOrNull()
 
     /**
@@ -859,7 +876,7 @@ object Inventory {
         for (f in filesIn(obj)) {
             val p = parse(f)
             val lists = p.lists
-            val head = listOf("№", "Инв. номер", "Наименование", "Место", "Кол-во", "Первонач. стоимость", "Сумма", "Приоритет", "Статус",
+            val head = listOf("№", "Инв. номер", "Наименование", "Место", "Кол-во", "Первонач. стоимость", "Сумма", "Приоритет", "Список",
                 "Осмотрено", "Состояние", "Снимков", "Первый снимок", "Последний снимок", "Комментарий", "Папка")
             val sheets = mutableListOf<Xlsx.Out>()
             val total = listOf("Всего", "Осмотрено", "Не осмотрено", "Осмотрено, %", "Первонач. стоимость осмотренного", "Нерабочих")
@@ -869,7 +886,7 @@ object Inventory {
                     if (items.isEmpty()) 0 else kotlin.math.round(done.size * 1000.0 / items.size) / 10.0, done.sumOf { it.initial ?: 0.0 },
                     items.count(st::broken))
             }
-            val summary = mutableListOf<List<Any?>>(listOf("Список") + total)
+            val summary = mutableListOf<List<Any?>>(listOf("Лист") + total)
             val notes = HashMap<File, String?>()  // комментарий папки — что с предметом не так (общая папка — один раз)
             for (l in lists) {
                 val items = p.items.filter { it.list == l }
@@ -885,7 +902,7 @@ object Inventory {
                     when { r == 0 -> Xlsx.PLAIN; st.broken(items[r - 1]) -> Xlsx.RED; st.inspected(items[r - 1]) -> Xlsx.GREEN; else -> Xlsx.PLAIN }
                 }
             }
-            if (lists.size > 1) summary += line("Все списки", p.items)
+            if (lists.size > 1) summary += line("Все листы", p.items)
             // По приоритетам — по всем спискам описи.
             summary += listOf<Any?>()
             summary += listOf("Приоритет") + total
