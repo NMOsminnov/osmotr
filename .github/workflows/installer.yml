@@ -21,25 +21,38 @@ jobs:
         shell: bash -eo pipefail {0}
     steps:
       - uses: actions/checkout@v4
+      # IPA — по содержимому приложения: не менялось — из кэша (сборка установщика — минуты, а не 20).
+      - name: IPA из кэша
+        id: ipa-cache
+        uses: actions/cache@v4
+        with:
+          path: Osmotr.ipa
+          key: osmotr-ipa-${{ hashFiles('shared/src/**', 'iosApp/**', 'gradle/libs.versions.toml', 'shared/build.gradle.kts') }}
       - uses: actions/setup-java@v4
+        if: steps.ipa-cache.outputs.cache-hit != 'true'
         with:
           distribution: temurin
           java-version: "21"
       - uses: gradle/actions/setup-gradle@v4
+        if: steps.ipa-cache.outputs.cache-hit != 'true'
       - name: Кэш Kotlin/Native
+        if: steps.ipa-cache.outputs.cache-hit != 'true'
         uses: actions/cache@v4
         with:
           path: ~/.konan
           key: konan-${{ runner.os }}-${{ hashFiles('gradle/libs.versions.toml') }}
       - name: Память сборке (облачный Mac — 7 ГБ; выпускная сборка Kotlin/Native прожорлива)
+        if: steps.ipa-cache.outputs.cache-hit != 'true'
         run: |
           sed -i '' 's/^org.gradle.jvmargs=.*/org.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=1g -XX:+UseParallelGC -Dfile.encoding=UTF-8/' gradle.properties
           echo "kotlin.native.jvmArgs=-Xmx4g" >> gradle.properties
       - name: Проект Xcode
+        if: steps.ipa-cache.outputs.cache-hit != 'true'
         run: |
           brew install xcodegen
           cd iosApp && xcodegen generate
       - name: IPA без подписи (подпишет установщик Apple ID человека)
+        if: steps.ipa-cache.outputs.cache-hit != 'true'
         run: |
           xcodebuild -project iosApp/Osmotr.xcodeproj -scheme Osmotr -configuration Release \
             -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build/dev \
