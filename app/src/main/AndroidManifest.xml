@@ -10,6 +10,8 @@
         </intent>
     </queries>
     <!-- Папка «Осмотры» в корне памяти: Android 11+ — доступ ко всем файлам, 8–10 — запись. -->
+    <!-- Диктофон: голосовые заметки к папкам и описям. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE"
         tools:ignore="ScopedStorage" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"

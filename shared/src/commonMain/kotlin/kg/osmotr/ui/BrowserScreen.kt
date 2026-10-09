@@ -151,6 +151,8 @@ fun BrowserScreen(
     var moving by remember { mutableStateOf(false) }
     var movingFolder by remember { mutableStateOf(false) }
     var editingNote by remember { mutableStateOf(false) }
+    var recording by remember { mutableStateOf(false) }
+    val voices by produceState(emptyList<File>(), dir, version) { if (dir.isDirectory) value = withContext(Dispatchers.IO) { Store.voiceNotes(dir) } }
     val note by produceState<String?>(null, dir, version) { if (dir.isDirectory) value = withContext(Dispatchers.IO) { Store.note(dir) } }
     val people by produceState(emptyList<Store.Contact>(), dir, version) { if (dir.isDirectory) value = withContext(Dispatchers.IO) { Store.contacts(dir) } }
     // Опись объекта (если она в этой папке) и предметы описи, лежащие в этой папке; прошлое — сразу.
@@ -277,6 +279,7 @@ fun BrowserScreen(
                                     onClick = { menu = false; contacts() })
                                 DropdownMenuItem({ Text(if (note == null) "Добавить комментарий" else "Комментарий") },
                                     leadingIcon = { Icon(AppIcons.Notes, null) }, onClick = { menu = false; editingNote = true })
+                                DropdownMenuItem({ Text("Диктофон") }, leadingIcon = { Icon(AppIcons.Mic, null) }, onClick = { menu = false; recording = true })
                                 DropdownMenuItem({ Text("Переместить папку") }, leadingIcon = { Icon(AppIcons.DriveFileMove, null) },
                                     onClick = { menu = false; movingFolder = true })
                                 DropdownMenuItem({ Text("Переименовать") }, leadingIcon = { Icon(AppIcons.DriveFileRenameOutline, null) },
@@ -329,6 +332,9 @@ fun BrowserScreen(
                             Text(text, style = MaterialTheme.typography.bodyMedium, maxLines = 6, overflow = TextOverflow.Ellipsis)
                         }
                     }
+                }
+                if (voices.isNotEmpty()) item(span = { GridItemSpan(maxLineSpan) }, key = "voice", contentType = "voice") {
+                    VoiceNotesCard(voices)
                 }
                 card?.progress?.let { (done, total) ->
                     item(span = { GridItemSpan(maxLineSpan) }, key = "inventory", contentType = "inventory") {
@@ -423,6 +429,7 @@ fun BrowserScreen(
             dismissButton = { TextButton(onClick = { deleteFolder = false }) { Text("Отмена") } },
         )
     }
+    if (recording) VoiceRecorderDialog(dir, onClose = { recording = false })
     if (editingNote) NoteDialog(note.orEmpty(), onDone = { editingNote = false; Store.setNote(dir, it) }, onCancel = { editingNote = false })
     if (movingFolder) FolderPicker("Переместить «${dir.name}»", dir.parentFile ?: Store.root, "Сюда",
         onPick = { to -> movingFolder = false; Store.moveFolder(dir, to)?.let(renamed) },

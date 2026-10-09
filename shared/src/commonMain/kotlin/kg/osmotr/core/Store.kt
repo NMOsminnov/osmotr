@@ -146,6 +146,21 @@ object Store {
         return target
     }
 
+    // ---------- Голосовые заметки ----------
+    //
+    // Диктофон (автор, 09.10.2026: «Диктофон добавляем»): запись — файлом .m4a прямо в папке,
+    // рядом со снимками и «Комментарий.txt»; видна по USB, уходит в архив. Имя — как у снимков:
+    // папка и время, — по нему понятно, откуда и когда.
+
+    fun isVoice(f: File) = f.isFile && !f.name.startsWith(".") && f.extension.lowercase() == "m4a" && f.length() > 0
+
+    /** Голосовые заметки папки — новые первыми. */
+    fun voiceNotes(dir: File): List<File> = dir.listFiles()?.filter(::isVoice)?.sortedByDescending { it.name }.orEmpty()
+
+    /** Файл для новой заметки: «<папка>_голос_ГГГГММДД_ЧЧММСС.m4a». */
+    fun newVoiceFile(dir: File): File =
+        File(dir, cleanName(dir.name).take(60) + "_голос_" + Platform.format(Platform.nowMs(), "yyyyMMdd_HHmmss") + ".m4a")
+
     // ---------- Комментарий к папке ----------
 
     /** Комментарий лежит в самой папке обычным файлом — виден и по USB, уходит в архив. */

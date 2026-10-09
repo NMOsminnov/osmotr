@@ -56,6 +56,18 @@ class StoreTest {
         assertTrue("HEIC штатной камеры — тоже снимок", Store.isPhoto(a))
     }
 
+    @Test fun голосовые_заметки_в_папке_новые_первыми_пустая_не_считается() {
+        val dir = Store.createFolder(Store.root, "Насосная")!!
+        val a = File(dir, "Насосная_голос_20261009_100000.m4a").apply { writeBytes(ByteArray(10) { 1 }) }
+        val b = File(dir, "Насосная_голос_20261009_120000.m4a").apply { writeBytes(ByteArray(10) { 1 }) }
+        File(dir, "Насосная_голос_20261009_130000.m4a").writeBytes(ByteArray(0))  // запись не удалась
+        assertEquals(listOf(b, a), Store.voiceNotes(dir))
+        val next = Store.newVoiceFile(dir)
+        assertTrue(next.name.startsWith("Насосная_голос_") && next.name.endsWith(".m4a"))
+        // Не снимок — сетка и учёт «осмотрено» её не видят.
+        assertTrue(!Store.isPhoto(a))
+    }
+
     @Test fun естественный_порядок() {
         assertEquals(listOf("Насос 2", "Насос 10", "насос 11"), listOf("Насос 10", "насос 11", "Насос 2").sortedWith(Store.NATURAL))
     }

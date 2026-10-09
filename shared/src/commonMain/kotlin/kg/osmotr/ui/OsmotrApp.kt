@@ -173,7 +173,8 @@ private fun Body(host: Host, incoming: SnapshotStateList<Picked>, start: List<Sc
             is Screen.Inventory -> InventoryScreen(obj = top.obj, into = top.into, initialQuery = top.query, openFolder = { push(Screen.Browser(it)) },
                 folders = { push(Screen.Browser(it)) }, close = { pop() },
                 // Папка после набора могла переименоваться — вернуться в неё по новому имени.
-                picked = { dir -> pop(); replaceTop(Screen.Browser(dir)) })
+                picked = { dir -> pop(); replaceTop(Screen.Browser(dir)) },
+                contacts = { push(Screen.Contacts(it)) })
             is Screen.Tree -> TreeScreen(current = top.here, open = { replaceTop(Screen.Browser(it)) }, close = { pop() })
             is Screen.Contacts -> ContactsScreen(dir = top.dir, close = { pop() })
             is Screen.Viewer -> ViewerScreen(dir = top.dir, start = top.start, close = { pop() })

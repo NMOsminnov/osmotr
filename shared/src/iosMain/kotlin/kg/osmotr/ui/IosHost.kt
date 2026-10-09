@@ -6,6 +6,22 @@ import kotlinx.cinterop.BetaInteropApi
 import kotlinx.cinterop.ExperimentalForeignApi
 import kotlinx.cinterop.addressOf
 import kotlinx.cinterop.usePinned
+import platform.AVFAudio.AVAudioPlayer
+import platform.AVFAudio.setActive
+import platform.AVFAudio.AVAudioPlayerDelegateProtocol
+import platform.AVFAudio.AVAudioRecorder
+import platform.AVFAudio.AVAudioSession
+import platform.AVFAudio.AVAudioSessionCategoryPlayAndRecord
+import platform.AVFAudio.AVAudioSessionCategoryPlayback
+import platform.AVFAudio.AVAudioSessionCategoryOptionDefaultToSpeaker
+import platform.AVFAudio.AVAudioSessionRecordPermissionDenied
+import platform.AVFAudio.AVAudioSessionRecordPermissionUndetermined
+import platform.AVFAudio.AVEncoderBitRateKey
+import platform.AVFAudio.AVFormatIDKey
+import platform.AVFAudio.AVNumberOfChannelsKey
+import platform.AVFAudio.AVSampleRateKey
+import platform.CoreAudioTypes.kAudioFormatMPEG4AAC
+import platform.Foundation.NSNumber
 import platform.Contacts.CNContactProperty
 import platform.Contacts.CNPhoneNumber
 import platform.ContactsUI.CNContactPickerDelegateProtocol
@@ -189,4 +205,72 @@ object IosHost : Host {
     }
 
     override val cacheDir: File get() = File(NSTemporaryDirectory().trimEnd('/') + "/osmotr")
+
+    // ---------- Диктофон ----------
+    // AAC, моно, 44,1 кГц — как на Android; файл .m4a в папке.
+
+    private var recorder: AVAudioRecorder? = null
+    private var player: AVAudioPlayer? = null
+    private var playDone: (() -> Unit)? = null
+    private val playerDelegate = object : NSObject(), AVAudioPlayerDelegateProtocol {
+        override fun audioPlayerDidFinishPlaying(player: AVAudioPlayer, successfully: Boolean) { stopPlaying() }
+    }
+
+    override fun startRecording(file: File): Boolean {
+        val session = AVAudioSession.sharedInstance()
+        when (session.recordPermission) {
+            AVAudioSessionRecordPermissionUndetermined -> { session.requestRecordPermission { } ; return false }
+            AVAudioSessionRecordPermissionDenied -> { ToastBus.show("Разрешите микрофон: Настройки → Осмотр → Микрофон"); return false }
+            else -> {}
+        }
+        stopPlaying()
+        session.setCategory(AVAudioSessionCategoryPlayAndRecord, AVAudioSessionCategoryOptionDefaultToSpeaker, null)
+        session.setActive(true, null)
+        val settings = mapOf<Any?, Any?>(
+            AVFormatIDKey to NSNumber(unsignedInt = kAudioFormatMPEG4AAC),
+            AVSampleRateKey to NSNumber(double = 44_100.0),
+            AVNumberOfChannelsKey to NSNumber(int = 1),
+            AVEncoderBitRateKey to NSNumber(int = 64_000),
+        )
+        val r = AVAudioRecorder(NSURL.fileURLWithPath(file.path), settings, null)
+        r.meteringEnabled = true
+        if (!r.record()) return false
+        recorder = r
+        return true
+    }
+
+    override fun stopRecording(): Boolean {
+        val r = recorder ?: return false
+        recorder = null
+        r.stop()
+        AVAudioSession.sharedInstance().setActive(false, null)
+        return true
+    }
+
+    override fun recordingLevel(): Float {
+        val r = recorder ?: return 0f
+        r.updateMeters()
+        val db = r.averagePowerForChannel(0u)  // −160…0 дБ; голос — примерно −50…−5
+        return ((db + 50f) / 45f).coerceIn(0f, 1f)
+    }
+
+    override fun play(file: File, done: () -> Unit) {
+        stopPlaying()
+        val session = AVAudioSession.sharedInstance()
+        session.setCategory(AVAudioSessionCategoryPlayback, null)
+        session.setActive(true, null)
+        val p = AVAudioPlayer(NSURL.fileURLWithPath(file.path), null)
+        p.delegate = playerDelegate
+        if (!p.play()) { done(); return }
+        player = p; playDone = done
+    }
+
+    override fun stopPlaying() {
+        player?.stop()
+        player = null
+        playDone?.let { playDone = null; it() }
+    }
+
+    override fun duration(file: File): Long =
+        (AVAudioPlayer(NSURL.fileURLWithPath(file.path), null).duration * 1000).toLong()
 }

@@ -26,6 +26,7 @@ targets:
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
         # Разрешения — по одному, когда нужны, и с честной подписью (App Review 5.1.1).
         NSCameraUsageDescription: Снимки оборудования при осмотре
+        NSMicrophoneUsageDescription: Голосовые заметки к папкам и описям
         NSPhotoLibraryAddUsageDescription: Копия снимков осмотра в альбоме «Осмотры», чтобы не потерять
         # Папка приложения видна в «Файлах» («На iPhone → Осмотр») и через кабель на компьютере.
         UIFileSharingEnabled: true

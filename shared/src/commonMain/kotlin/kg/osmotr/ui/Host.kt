@@ -32,6 +32,19 @@ interface Host {
     val pickPhone: ((got: (name: String, phone: String) -> Unit) -> Unit)?
     /** Папка для временных файлов (архивы перед отправкой). */
     val cacheDir: File
+
+    // Диктофон — голосовые заметки к папке и к описи (AAC, .m4a, рядом со снимками).
+    /** Начать запись в [file]; false — нет доступа к микрофону (попросили — нажать ещё раз). */
+    fun startRecording(file: File): Boolean = false
+    /** Остановить запись; true — записалось. */
+    fun stopRecording(): Boolean = false
+    /** Громкость сейчас, 0…1 — полоска, что микрофон слышит. */
+    fun recordingLevel(): Float = 0f
+    /** Проиграть запись; [done] — доиграла или остановили. */
+    fun play(file: File, done: () -> Unit) { done() }
+    fun stopPlaying() {}
+    /** Длительность записи, мс; 0 — неизвестно. */
+    fun duration(file: File): Long = 0
 }
 
 val LocalHost = staticCompositionLocalOf<Host> { error("Host не задан") }

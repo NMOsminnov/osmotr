@@ -20,6 +20,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.foundation.border
 import androidx.compose.foundation.background
@@ -35,6 +36,7 @@ import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -134,6 +136,7 @@ suspend fun zipFolder(host: Host, dir: File, progress: (Float) -> Unit): Zipped 
 
 /** Выбранные папки и снимки — одним архивом; пути — от [base]. */
 private fun ours(name: String) = name == Store.NOTE || name == Store.CONTACTS || name == Inventory.MEMBERS || name == Inventory.BROKEN ||
+    name.lowercase().endsWith(".m4a") ||
     ((name.startsWith(Inventory.PREFIX) || name.startsWith("Осмотр — ")) && name.endsWith(".xlsx", true))
 
 /** Готовый архив: файл, сколько в нём снимков и сколько весит. */
@@ -210,3 +213,25 @@ fun Modifier.panel(shape: androidx.compose.ui.graphics.Shape = androidx.compose.
                    tint: androidx.compose.ui.graphics.Color? = null): Modifier =
     this.then(Modifier.clip(shape)).background(tint ?: MaterialTheme.colorScheme.surface)
         .border(1.dp, MaterialTheme.colorScheme.outlineVariant, shape)
+
+/** Комментарий папки или описи — карточкой; касание — править. */
+@Composable
+fun NoteCard(text: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    androidx.compose.foundation.layout.Row(modifier.fillMaxWidth().panel().clickable(onClick = onClick).padding(12.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        Icon(AppIcons.Notes, null, tint = MaterialTheme.colorScheme.secondary)
+        Text(text, style = MaterialTheme.typography.bodyMedium, maxLines = 6, overflow = TextOverflow.Ellipsis)
+    }
+}
+
+/** Контакты людей папки или описи — строкой: первый и «ещё N»; касание — все. */
+@Composable
+fun PeopleCard(people: List<Store.Contact>, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    androidx.compose.foundation.layout.Row(modifier.fillMaxWidth().panel().clickable(onClick = onClick).padding(12.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+        Icon(androidx.compose.material.icons.Icons.Default.Person, null, tint = MaterialTheme.colorScheme.secondary)
+        Text(people.first().let { listOf(it.name, it.phone).filter(String::isNotBlank).joinToString(" · ") } +
+            if (people.size > 1) " · ещё ${people.size - 1}" else "",
+            style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    }
+}

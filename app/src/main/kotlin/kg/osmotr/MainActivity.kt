@@ -141,6 +141,74 @@ class MainActivity : ComponentActivity(), Host {
     override val pickPhone: ((got: (String, String) -> Unit) -> Unit) = { got -> gotPhone = got; phone.launch(Unit) }
 
     override val cacheDir: File get() = File(super.getCacheDir().absolutePath)
+
+    // ---------- Диктофон ----------
+    // AAC, моно, 64 кбит/с: голос разборчив, минута — около полумегабайта.
+
+    private var recorder: android.media.MediaRecorder? = null
+    private var recordingTo: File? = null
+    private var player: android.media.MediaPlayer? = null
+    private var playDone: (() -> Unit)? = null
+    private val microphone = registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
+
+    override fun startRecording(file: File): Boolean {
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            microphone.launch(Manifest.permission.RECORD_AUDIO); return false
+        }
+        stopPlaying()
+        val r = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) android.media.MediaRecorder(this) else @Suppress("DEPRECATION") android.media.MediaRecorder()
+        return runCatching {
+            r.setAudioSource(android.media.MediaRecorder.AudioSource.MIC)
+            r.setOutputFormat(android.media.MediaRecorder.OutputFormat.MPEG_4)
+            r.setAudioEncoder(android.media.MediaRecorder.AudioEncoder.AAC)
+            r.setAudioChannels(1); r.setAudioSamplingRate(44_100); r.setAudioEncodingBitRate(64_000)
+            r.setOutputFile(file.path)
+            r.prepare(); r.start()
+            recorder = r; recordingTo = file
+        }.onFailure { r.release() }.isSuccess
+    }
+
+    override fun stopRecording(): Boolean {
+        val r = recorder ?: return false
+        recorder = null; recordingTo = null
+        val ok = runCatching { r.stop() }.isSuccess  // слишком короткая запись — stop() бросает
+        r.release()
+        return ok
+    }
+
+    override fun recordingLevel(): Float = (recorder?.let { runCatching { it.maxAmplitude }.getOrDefault(0) } ?: 0) / 32_767f
+
+    override fun play(file: File, done: () -> Unit) {
+        stopPlaying()
+        val p = android.media.MediaPlayer()
+        runCatching {
+            p.setDataSource(file.path)
+            p.setOnCompletionListener { stopPlaying() }
+            p.prepare(); p.start()
+            player = p; playDone = done
+        }.onFailure { p.release(); done() }
+    }
+
+    override fun stopPlaying() {
+        player?.let { runCatching { it.stop() }; it.release() }
+        player = null
+        playDone?.let { playDone = null; it() }
+    }
+
+    override fun duration(file: File): Long {
+        val m = android.media.MediaMetadataRetriever()  // AutoCloseable — только с Android 10
+        return try {
+            m.setDataSource(file.path)
+            m.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
+        } catch (_: Exception) { 0L } finally { runCatching { m.release() } }
+    }
+
+    override fun onStop() {
+        super.onStop()
+        // Свернули во время записи — записанное сохранить, а не потерять.
+        if (recorder != null) { val f = recordingTo; if (stopRecording() && f != null) { Store.scan(listOf(f)); Store.changed() } }
+        stopPlaying()
+    }
 }
 
 /** Выбрать номер из телефонной книги: доступ только к выбранному, без разрешения на все контакты. */

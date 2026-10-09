@@ -59,6 +59,8 @@ import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.animation.animateContentSize
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.expandVertically
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -135,7 +137,7 @@ fun money(v: Double?): String {
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun InventoryScreen(obj: File, into: File? = null, initialQuery: String? = null, openFolder: (File) -> Unit, folders: (File) -> Unit, close: () -> Unit,
-                    picked: (File) -> Unit = {}) {
+                    picked: (File) -> Unit = {}, contacts: (File) -> Unit = {}) {
     val host = LocalHost.current
     val scope = rememberCoroutineScope()
     val keyboard = LocalSoftwareKeyboardController.current
@@ -168,6 +170,13 @@ fun InventoryScreen(obj: File, into: File? = null, initialQuery: String? = null,
     var menu by remember { mutableStateOf(false) }
     var exporting by remember { mutableStateOf(false) }
     var newFolder by remember { mutableStateOf<String?>(null) }  // «Не найдено» — своя папка с названием от человека
+    // Корень описи — свой комментарий, голосовые заметки и контакты (автор, 09.10.2026: «не только в
+    // папки добавить, но и в корень описи… через 3 точки»).
+    var editingNote by remember { mutableStateOf(false) }
+    var recording by remember { mutableStateOf(false) }
+    val note by produceState<String?>(null, obj, version) { value = withContext(Dispatchers.IO) { Store.note(obj) } }
+    val voices by produceState(emptyList<File>(), obj, version) { value = withContext(Dispatchers.IO) { Store.voiceNotes(obj) } }
+    val people by produceState(emptyList<Store.Contact>(), obj, version) { value = withContext(Dispatchers.IO) { Store.contacts(obj) } }
 
     BackHandler(enabled = selected.isNotEmpty()) { selected.clear() }
     // Набор в папку: она переименовывается по составу — держим её текущее имя.
@@ -289,6 +298,10 @@ fun InventoryScreen(obj: File, into: File? = null, initialQuery: String? = null,
                     Box {
                         IconButton(onClick = { menu = true }) { Icon(Icons.Default.MoreVert, "Ещё") }
                         DropdownMenu(menu, { menu = false }) {
+                            DropdownMenuItem({ Text(if (note == null) "Добавить комментарий" else "Комментарий") },
+                                leadingIcon = { Icon(AppIcons.Notes, null) }, onClick = { menu = false; editingNote = true })
+                            DropdownMenuItem({ Text("Диктофон") }, leadingIcon = { Icon(AppIcons.Mic, null) }, onClick = { menu = false; recording = true })
+                            DropdownMenuItem({ Text("Контакты") }, leadingIcon = { Icon(Icons.Default.Person, null) }, onClick = { menu = false; contacts(obj) })
                             DropdownMenuItem({ Text(if (d?.parsed.isNullOrEmpty()) "Загрузить опись" else "Заменить файл описи") },
                                 leadingIcon = { Icon(AppIcons.UploadFile, null) }, onClick = { menu = false; load() })
                         }
@@ -335,7 +348,17 @@ fun InventoryScreen(obj: File, into: File? = null, initialQuery: String? = null,
                         // Сколько осмотрено и отбор — уезжают вместе со списком, а не держат треть экрана;
                         // ищут — вместо них одна строка: сколько нашлось.
                         if (v.query.isBlank()) item(key = "head", contentType = "head") {
-                            InventoryHead(scope2, st, v, all)
+                            Column(Modifier.animateContentSize(motion())) {
+                                // Комментарий, голосовые заметки и контакты описи — в самой шапке: отдельной
+                                // строкой выше неё они появлялись за краем (список держит первую видимую строку).
+                                if (target == null && (note != null || voices.isNotEmpty() || people.isNotEmpty()))
+                                    Column(Modifier.padding(horizontal = 12.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        note?.let { NoteCard(it, onClick = { editingNote = true }) }
+                                        if (voices.isNotEmpty()) VoiceNotesCard(voices)
+                                        if (people.isNotEmpty()) PeopleCard(people, onClick = { contacts(obj) })
+                                    }
+                                InventoryHead(scope2, st, v, all)
+                            }
                         } else item(key = "found", contentType = "found") {
                             Text(if (shown.isEmpty()) "Не найдено" else "Найдено: ${shown.size}", Modifier.animateItem(fadeInSpec = motion(), placementSpec = motion(), fadeOutSpec = motion())
                                 .padding(horizontal = 16.dp, vertical = 8.dp), style = MaterialTheme.typography.labelLarge,
@@ -427,6 +450,8 @@ fun InventoryScreen(obj: File, into: File? = null, initialQuery: String? = null,
     }
 
     if (exporting) ExportDialog(obj, onClose = { exporting = false })
+    if (recording) VoiceRecorderDialog(obj, onClose = { recording = false })
+    if (editingNote) NoteDialog(note.orEmpty(), onDone = { editingNote = false; Store.setNote(obj, it) }, onCancel = { editingNote = false })
     newFolder?.let { initial ->
         NameDialog("Название папки", initial = initial, confirm = "Создать", onDone = { name ->
             newFolder = null; v.query = ""; keyboard?.hide()
