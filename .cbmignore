@@ -1,0 +1,6 @@
+build/
+.gradle/
+installer/target/
+web/node_modules/
+*.ipa
+*.apk
