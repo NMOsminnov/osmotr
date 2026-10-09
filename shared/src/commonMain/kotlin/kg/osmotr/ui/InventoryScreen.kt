@@ -65,7 +65,6 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.Lifecycle
 import androidx.compose.material3.FilledTonalIconButton
@@ -557,37 +556,26 @@ fun BrokenLabel() = Text("нерабочее", Modifier.clip(RoundedCornerShape(
 object ShootFrom { var list: File? = null }
 
 /**
- * Клавиатура поиска: цифры (бирки — в основном цифры, разделители не нужны) или буквы. Цифры —
- * раскладкой «телефон»: обычную «число» Gboard на части телефонов показывает буквами.
- */
-private object SearchKeys { var digits by mutableStateOf(true) }
-
-/**
- * Поиск описи — капсулой: что искать, очистить и переключатель клавиатуры «123 / АБВ». По
- * умолчанию — цифры: номер с бирки набирается сразу, без переключения на цифровой ряд.
+ * Поиск описи — капсулой: что искать и «очистить». Клавиатура обычная: инвентарник — цифры вместе
+ * с буквами (автор, 09.10.2026: «Инвентарник это номер + буквы... зачем ты поиск разделил»).
  */
 @Composable
 private fun SearchCapsule(query: String, onQuery: (String) -> Unit, focus: FocusRequester, onDone: () -> Unit) {
-    val digits = SearchKeys.digits
     Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp).height(52.dp)
         .clip(androidx.compose.foundation.shape.CircleShape).background(MaterialTheme.colorScheme.surfaceVariant)
         .padding(start = 16.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
         Icon(Icons.Default.Search, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
         Box(Modifier.weight(1f).padding(horizontal = 12.dp), contentAlignment = Alignment.CenterStart) {
-            if (query.isEmpty()) Text(if (digits) "Номер с бирки" else "Номер или название", color = MaterialTheme.colorScheme.onSurfaceVariant,
-                style = MaterialTheme.typography.bodyLarge, maxLines = 1)
+            if (query.isEmpty()) Text("Инв. номер или название", color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
             androidx.compose.foundation.text.BasicTextField(query, onQuery, Modifier.fillMaxWidth().focusRequester(focus), singleLine = true,
                 textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface),
                 cursorBrush = androidx.compose.ui.graphics.SolidColor(MaterialTheme.colorScheme.primary),
-                keyboardOptions = KeyboardOptions(keyboardType = if (digits) KeyboardType.Phone else KeyboardType.Text, imeAction = ImeAction.Search),
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                 keyboardActions = KeyboardActions(onSearch = { onDone() }))
         }
         AnimatedVisibility(query.isNotEmpty(), enter = fadeIn(motion()) + scaleIn(motion()), exit = fadeOut(motion()) + scaleOut(motion())) {
             IconButton(onClick = { onQuery("") }) { Icon(Icons.Default.Close, "Очистить") }
-        }
-        // Клавиатура: цифры ↔ буквы (Б-370, F000… — с буквами).
-        TextButton(onClick = { SearchKeys.digits = !digits; runCatching { focus.requestFocus() } }, Modifier.height(40.dp)) {
-            Text(if (digits) "АБВ" else "123", style = MaterialTheme.typography.labelLarge)
         }
     }
 }
