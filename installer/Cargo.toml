@@ -1,0 +1,9 @@
+# Установщик «Осмотра» на iPhone с Windows: ядро (шаги установки) и окно (Tauri).
+[workspace]
+resolver = "2"
+members = ["core", "app"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
