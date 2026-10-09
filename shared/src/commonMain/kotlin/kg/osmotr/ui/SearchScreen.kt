@@ -29,6 +29,8 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -60,21 +62,32 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
 
-/** Поиск папок: поле с клавиатурой сразу, результаты по мере набора; касание — в папку. */
+/**
+ * Поиск папок и предметов: поле с клавиатурой сразу, результаты по мере набора; касание — в папку.
+ * Открыт внутри описи — ищет только в ней (автор, 09.10.2026: «поиск работает и по другим описям»);
+ * «Везде» — по всем. С главного — везде.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SearchScreen(here: File, initial: String = "", open: (File) -> Unit, close: () -> Unit) {
     var query by rememberSaveable { mutableStateOf(initial) }
+    val obj by produceState<File?>(null, here) { value = withContext(Dispatchers.IO) { if (here == Store.root) null else Inventory.objectOf(here) } }
+    var everywhere by rememberSaveable { mutableStateOf(false) }
+    val scope0 = obj?.takeIf { !everywhere }
     val index by produceState<List<Search.Entry>?>(null) { value = withContext(Dispatchers.IO) { Search.index() } }
     val itemIndex by produceState<List<Search.ItemEntry>>(emptyList()) {
         value = withContext(Dispatchers.IO) { runCatching { Search.items() }.getOrDefault(emptyList()).also { all -> Search.prepare(all.map { it.item }) } }
     }
-    val itemHits by produceState(emptyList<Search.ItemEntry>(), itemIndex, query) {
-        value = withContext(Dispatchers.Default) { Search.findItems(itemIndex, query) { isActive } }
+    val itemHits by produceState(emptyList<Search.ItemEntry>(), itemIndex, query, scope0) {
+        val pool = scope0?.let { o -> itemIndex.filter { it.obj == o } } ?: itemIndex
+        value = withContext(Dispatchers.Default) { Search.findItems(pool, query) { isActive } }
     }
     val scope = androidx.compose.runtime.rememberCoroutineScope()
-    val hits by produceState(emptyList<Search.Hit>(), index, query) {
+    val hits by produceState(emptyList<Search.Hit>(), index, query, scope0) {
         val i = index ?: return@produceState
-        value = withContext(Dispatchers.Default) { Search.find(i, query, here) }
+        val inside = scope0?.let { it.absolutePath + File.separator }
+        val pool = if (inside == null) i else i.filter { it.dir.absolutePath.startsWith(inside) }
+        value = withContext(Dispatchers.Default) { Search.find(pool, query, here) }
     }
     val focus = remember { FocusRequester() }
     val keyboard = LocalSoftwareKeyboardController.current
@@ -91,6 +104,14 @@ fun SearchScreen(here: File, initial: String = "", open: (File) -> Unit, close: 
                 keyboardActions = KeyboardActions(onSearch = { keyboard?.hide() }),
                 colors = TextFieldDefaults.colors(focusedContainerColor = Color.Transparent, unfocusedContainerColor = Color.Transparent),
             )
+        }
+        // Внутри описи — где искать: только в ней или везде.
+        obj?.let { o ->
+            Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                FilterChip(!everywhere, { everywhere = false }, { Text("В описи «${o.name}»", maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                    Modifier.weight(1f, fill = false), shape = androidx.compose.foundation.shape.CircleShape)
+                FilterChip(everywhere, { everywhere = true }, { Text("Везде") }, shape = androidx.compose.foundation.shape.CircleShape)
+            }
         }
         HorizontalDivider()
         Box(Modifier.fillMaxSize()) {
