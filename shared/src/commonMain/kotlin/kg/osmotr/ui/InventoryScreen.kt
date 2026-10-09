@@ -59,6 +59,7 @@ import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.animation.animateContentSize
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.animation.shrinkVertically
@@ -508,11 +509,22 @@ private fun ExportDialog(obj: File, onClose: () -> Unit) {
                     error != null -> Text("Не получилось: $error", color = MaterialTheme.colorScheme.error)
                     c == null -> LinearProgressIndicator(Modifier.fillMaxWidth())
                     else -> {
+                        // Вариант выгрузки — карточкой: значок, что уйдёт и сколько; касание — отправить.
+                        var nth = 0
                         @Composable fun option(title: String, sub: String, enabled: Boolean = true, onClick: () -> Unit) {
-                            Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).clickable(enabled = enabled, onClick = onClick).padding(vertical = 10.dp, horizontal = 4.dp)) {
-                                Text(title, style = MaterialTheme.typography.titleSmall,
-                                    color = if (enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant)
-                                Text(sub, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            val icon = when (nth++) { 0 -> AppIcons.UploadFile; 1 -> AppIcons.PhotoLibrary; else -> AppIcons.CameraAlt }
+                            Row(Modifier.fillMaxWidth().padding(vertical = 4.dp).panel().clickable(enabled = enabled, onClick = onClick).padding(14.dp),
+                                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                Box(Modifier.size(40.dp).clip(androidx.compose.foundation.shape.CircleShape).background(MaterialTheme.colorScheme.primaryContainer),
+                                    contentAlignment = Alignment.Center) {
+                                    Icon(icon, null, tint = if (enabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                                Column(Modifier.weight(1f)) {
+                                    Text(title, style = MaterialTheme.typography.titleSmall,
+                                        color = if (enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Text(sub, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                                if (enabled) Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                         }
                         option("Отчёт Excel", "что осмотрено, что нет — один файл") {
@@ -585,13 +597,14 @@ object ShootFrom { var list: File? = null }
  * с буквами (автор, 09.10.2026: «Инвентарник это номер + буквы... зачем ты поиск разделил»).
  */
 @Composable
-private fun SearchCapsule(query: String, onQuery: (String) -> Unit, focus: FocusRequester, onDone: () -> Unit) {
-    Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp).height(52.dp)
+fun SearchCapsule(query: String, onQuery: (String) -> Unit, focus: FocusRequester, onDone: () -> Unit,
+                  placeholder: String = "Инв. номер или название", modifier: Modifier = Modifier) {
+    Row(modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp).height(52.dp)
         .clip(androidx.compose.foundation.shape.CircleShape).background(MaterialTheme.colorScheme.surfaceVariant)
         .padding(start = 16.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
         Icon(Icons.Default.Search, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
         Box(Modifier.weight(1f).padding(horizontal = 12.dp), contentAlignment = Alignment.CenterStart) {
-            if (query.isEmpty()) Text("Инв. номер или название", color = MaterialTheme.colorScheme.onSurfaceVariant,
+            if (query.isEmpty()) Text(placeholder, color = MaterialTheme.colorScheme.onSurfaceVariant,
                 style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
             androidx.compose.foundation.text.BasicTextField(query, onQuery, Modifier.fillMaxWidth().focusRequester(focus), singleLine = true,
                 textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface),

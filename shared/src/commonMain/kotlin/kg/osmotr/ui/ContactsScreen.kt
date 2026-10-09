@@ -115,8 +115,15 @@ fun ContactsScreen(dir: File, close: () -> Unit) {
     ) { inner ->
         val l = list.orEmpty()
         Box(Modifier.fillMaxSize().padding(inner)) {
-            if (list != null && l.isEmpty()) Text("Контактов нет", Modifier.align(Alignment.TopCenter).padding(24.dp),
-                color = MaterialTheme.colorScheme.onSurfaceVariant)
+            // Пусто — что здесь и зачем, одной строкой; «Добавить» — внизу.
+            if (list != null && l.isEmpty()) Column(Modifier.align(Alignment.Center).padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Icon(AppIcons.Contacts, null, Modifier.size(48.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("Контактов пока нет", style = MaterialTheme.typography.titleMedium)
+                Text("Кто отвечает за объект: ФИО, должность, телефон. Касание телефона — звонок.",
+                    style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+            }
             LazyColumn(contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 96.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 itemsIndexed(l) { i, c ->

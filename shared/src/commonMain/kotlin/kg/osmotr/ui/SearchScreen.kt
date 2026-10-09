@@ -96,14 +96,9 @@ fun SearchScreen(here: File, initial: String = "", open: (File) -> Unit, close: 
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).statusBarsPadding().imePadding()) {
         Row(Modifier.fillMaxWidth().padding(4.dp), verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = close) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Назад") }
-            TextField(
-                query, { query = it }, Modifier.weight(1f).focusRequester(focus), singleLine = true,
-                placeholder = { Text("Поиск", maxLines = 1) },
-                trailingIcon = { if (query.isNotEmpty()) IconButton(onClick = { query = "" }) { Icon(Icons.Default.Close, "Очистить") } },
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                keyboardActions = KeyboardActions(onSearch = { keyboard?.hide() }),
-                colors = TextFieldDefaults.colors(focusedContainerColor = Color.Transparent, unfocusedContainerColor = Color.Transparent),
-            )
+            // То же поле-капсула, что в описи: инвентарник, название, комментарий, человек, телефон.
+            SearchCapsule(query, { query = it }, focus, onDone = { keyboard?.hide() }, placeholder = "Папка, инв. номер, человек",
+                modifier = Modifier.weight(1f))
         }
         // Внутри описи — где искать: только в ней или везде.
         obj?.let { o ->
