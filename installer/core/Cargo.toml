@@ -1,0 +1,29 @@
+[package]
+name = "osmotr-setup"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Шаги установки «Осмотра» на iPhone: драйверы, знакомство с телефоном, Apple ID, подпись и установка, режим разработчика, VPN"
+
+[dependencies]
+# Подпись и установка бесплатным Apple ID — то же, на чём работает iLoader (MIT). Без связки ключей
+# системы: на Linux она тянет dbus; настройки и сертификаты — файлами в папке установщика.
+isideload = { version = "0.4.4", default-features = false, features = ["install", "tokio-mt", "fs-storage"] }
+idevice = { version = "0.1.68", default-features = false, features = ["ring", "usbmuxd", "pair", "house_arrest", "afc", "installation_proxy", "amfi", "misagent", "remote_pairing"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "process", "fs"] }
+reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider", "http2", "stream"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
+futures = "0.3"
+plist = "1.8"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tracing = "0.1"
+uuid = { version = "1", features = ["v4"] }
+
+[target.'cfg(windows)'.dependencies]
+base64 = "0.22"
+
+[[bin]]
+name = "osmotr-setup-cli"
+path = "src/bin/cli.rs"

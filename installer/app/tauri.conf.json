@@ -1,0 +1,15 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Установка Осмотра",
+  "version": "0.1.0",
+  "identifier": "kg.osmotr.setup",
+  "build": { "frontendDist": "ui" },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      { "title": "Установка «Осмотра» на iPhone", "width": 880, "height": 640, "minWidth": 720, "minHeight": 560, "center": true }
+    ],
+    "security": { "csp": null }
+  },
+  "bundle": { "active": false, "icon": ["icons/icon.ico", "icons/icon.png"] }
+}
