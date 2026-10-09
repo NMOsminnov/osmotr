@@ -110,7 +110,7 @@ private fun Body(host: Host, incoming: SnapshotStateList<Picked>, start: List<Sc
         scope.launch {
             val got = host.afterResume() ?: return@launch
             // Снятое по описи — отчёт «осмотрено / нет» обновляется сам.
-            if (got.count > 0) launch(Dispatchers.IO) { Inventory.refreshReport(got.dir) }
+            if (got.count > 0) launch(Dispatchers.IO) { Inventory.refreshReportSoon(got.dir) }
             val top = stack.last()
             if (top !is Screen.Browser || top.dir != got.dir) stack.add(Screen.Browser(got.dir))
         }

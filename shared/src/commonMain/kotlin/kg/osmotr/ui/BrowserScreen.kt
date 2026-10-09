@@ -140,24 +140,9 @@ fun BrowserScreen(
     var editingNote by remember { mutableStateOf(false) }
     val note by produceState<String?>(null, dir, version) { value = withContext(Dispatchers.IO) { Store.note(dir) } }
     val people by produceState(emptyList<Store.Contact>(), dir, version) { value = withContext(Dispatchers.IO) { Store.contacts(dir) } }
-    // Опись объекта (если она в этой папке) и предметы описи, лежащие в этой папке.
-    data class Card(val progress: Pair<Int, Int>?, val items: List<Inventory.Item>, val similar: List<Inventory.Item>,
-                    val obj: File? = null, val status: Inventory.Status? = null)
-    val card by produceState<Card?>(null, dir, version) {
-        value = withContext(Dispatchers.IO) {
-            runCatching {
-                val own = if (dir == Store.root) emptyList() else Inventory.filesIn(dir)  // в корне описей не бывает
-                val progress = if (own.isEmpty()) null else {
-                    val st = Inventory.status(dir); val all = own.flatMap { Inventory.parse(it).items }
-                    all.count(st::inspected) to all.size
-                }
-                val items = if (dir == Store.root) emptyList() else Inventory.itemsIn(dir)
-                val obj = if (items.isEmpty()) null else Inventory.objectOf(dir.parentFile!!)
-                val st = obj?.let(Inventory::status)
-                val similar = if (obj == null || st == null) emptyList() else Inventory.similar(obj, items, st)
-                Card(progress, items, similar, obj, st)
-            }.getOrNull()
-        }
+    // Опись объекта (если она в этой папке) и предметы описи, лежащие в этой папке; прошлое — сразу.
+    val card by produceState(Visited.card[dir], dir, version) {
+        value = withContext(Dispatchers.IO) { cardOf(dir) }?.also { Visited.card[dir] = it }
     }
     var zipping by remember { mutableStateOf<Float?>(null) }
     var zipError by remember { mutableStateOf<String?>(null) }
@@ -331,11 +316,11 @@ fun BrowserScreen(
                 card?.items?.takeIf { it.isNotEmpty() }?.let { items ->
                     item(span = { GridItemSpan(maxLineSpan) }, key = "item", contentType = "item") {
                         ItemCard(items, card?.similar.orEmpty(), pick = { Inventory.objectOf(dir.parentFile!!)?.let(pickItems) }, add = { more ->
-                            scope.launch { withContext(Dispatchers.IO) { Inventory.addTo(dir, more).also { Inventory.refreshReport(it) } }.let(renamed) }
+                            scope.launch { withContext(Dispatchers.IO) { Inventory.addTo(dir, more).also { warmFolder(it); Inventory.refreshReportSoon(it) } }.let(renamed) }
                         }, remove = { one ->
-                            scope.launch { withContext(Dispatchers.IO) { Inventory.removeFrom(dir, one).also { Inventory.refreshReport(it) } }.let(renamed) }
+                            scope.launch { withContext(Dispatchers.IO) { Inventory.removeFrom(dir, one).also { warmFolder(it); Inventory.refreshReportSoon(it) } }.let(renamed) }
                         }, shot = { card?.status?.inspected(it) == true }, broken = { card?.status?.broken(it) == true }, setBroken = { one, on ->
-                            card?.obj?.let { o -> scope.launch { withContext(Dispatchers.IO) { Inventory.setBroken(o, listOf(one), on); Inventory.refreshReport(o) } } }
+                            card?.obj?.let { o -> scope.launch { withContext(Dispatchers.IO) { Inventory.setBroken(o, listOf(one), on); Inventory.refreshReportSoon(o) } } }
                         })
                     }
                 }
@@ -554,6 +539,33 @@ private fun ItemCard(items: List<Inventory.Item>, similar: List<Inventory.Item>,
 private object Visited {
     val position = HashMap<File, Pair<Int, Int>>()
     val listing = HashMap<File, Store.Listing>()
+    val card = HashMap<File, Card>()
+}
+
+/** Опись объекта (если она в этой папке) и предметы описи, лежащие в этой папке. */
+private data class Card(val progress: Pair<Int, Int>?, val items: List<Inventory.Item>, val similar: List<Inventory.Item>,
+                        val obj: File? = null, val status: Inventory.Status? = null)
+
+private fun cardOf(dir: File): Card? = runCatching {
+    val own = if (dir == Store.root) emptyList() else Inventory.filesIn(dir)  // в корне описей не бывает
+    val progress = if (own.isEmpty()) null else {
+        val st = Inventory.status(dir); val all = own.flatMap { Inventory.parse(it).items }
+        all.count(st::inspected) to all.size
+    }
+    val items = if (dir == Store.root) emptyList() else Inventory.itemsIn(dir)
+    val obj = if (items.isEmpty()) null else Inventory.objectOf(dir.parentFile!!)
+    val st = obj?.let(Inventory::status)
+    val similar = if (obj == null || st == null) emptyList() else Inventory.similar(obj, items, st)
+    Card(progress, items, similar, obj, st)
+}.getOrNull()
+
+/**
+ * Папку переименовали (состав предметов поменялся) — содержимое и карточку прочитать до перехода:
+ * иначе под новым именем она открывалась пустой, а заполнялась кадром позже. Вызывать в фоне.
+ */
+fun warmFolder(dir: File) {
+    runCatching { Visited.listing[dir] = Store.list(dir) }
+    cardOf(dir)?.let { Visited.card[dir] = it }
 }
 
 private fun keyOf(f: File) = if (f.isDirectory) "d:" + f.path else f.path

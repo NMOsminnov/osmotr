@@ -1,6 +1,7 @@
 package kg.osmotr.core
 
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
 
 /**
  * Описи — подбор столбцов, общий для Android и iPhone (перенесён из app/…/Inventory.kt без
@@ -876,4 +877,28 @@ object Inventory {
 
     /** Пересобрать отчёт объекта, к которому относится [dir] (в фоне вызывающего). */
     fun refreshReport(dir: File) { objectOf(dir)?.let { runCatching { writeReport(it) } } }
+
+    /**
+     * Пересобрать отчёт объекта **в фоне**, не держа экран: на описи в 5–6 тыс. строк это секунды,
+     * а человек ждал их после каждого «Готово» и «убрать из папки». Запросы во время сборки
+     * сливаются в одну пересборку после неё. Кому отчёт нужен сейчас (выгрузка) — [writeReport].
+     */
+    fun refreshReportSoon(dir: File) {
+        val obj = objectOf(dir) ?: return
+        val k = obj.path
+        val first = kotlinx.atomicfu.locks.synchronized(reportsLock) { if (k in reports) { reports[k] = true; false } else { reports[k] = false; true } }
+        if (!first) return
+        reportScope.launch {
+            do {
+                runCatching { writeReport(obj) }
+                val again = kotlinx.atomicfu.locks.synchronized(reportsLock) {
+                    if (reports[k] == true) { reports[k] = false; true } else { reports.remove(k); false }
+                }
+            } while (again)
+        }
+    }
+    /** Объект → «просили ещё раз, пока собирали». */
+    private val reports = HashMap<String, Boolean>()
+    private val reportsLock = kotlinx.atomicfu.locks.SynchronizedObject()
+    private val reportScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Default)
 }

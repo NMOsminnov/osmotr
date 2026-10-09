@@ -127,9 +127,8 @@ fun InventoryScreen(obj: File, into: File? = null, initialQuery: String? = null,
     data class Data(val parsed: List<Inventory.Parsed>, val status: Inventory.Status)
     val data by produceState<Data?>(null, obj, version, reparse) {
         value = withContext(Dispatchers.IO) {
-            Data(Inventory.filesIn(obj).map { Inventory.parse(it) }, Inventory.status(obj)).also {
-                runCatching { Inventory.writeReport(obj) }  // отчёт — всегда свежий
-            }
+            // Отчёт — свежий, но в фоне: список не ждёт его секунды.
+            Data(Inventory.filesIn(obj).map { Inventory.parse(it) }, Inventory.status(obj)).also { Inventory.refreshReportSoon(obj) }
         }
     }
     val selected = remember(obj) { mutableStateListOf<Inventory.Item>() }
@@ -170,7 +169,7 @@ fun InventoryScreen(obj: File, into: File? = null, initialQuery: String? = null,
                 var dir = if (add.isEmpty()) t else Inventory.addTo(t, add)
                 // Последний предмет папки не убирается (removeFrom сам это стережёт).
                 drop.forEach { dir = Inventory.removeFrom(dir, it) }
-                Inventory.refreshReport(dir); dir
+                warmFolder(dir); Inventory.refreshReportSoon(dir); dir
             }
             pending.clear(); applying = false; target = out; picked(out)
         }
@@ -266,7 +265,7 @@ fun InventoryScreen(obj: File, into: File? = null, initialQuery: String? = null,
                 onClick = {
                     val items = selected.toList(); selected.clear()
                     scope.launch {
-                        val dir = withContext(Dispatchers.IO) { Inventory.group(obj, items).also { Inventory.refreshReport(it) } }
+                        val dir = withContext(Dispatchers.IO) { Inventory.group(obj, items).also { warmFolder(it); Inventory.refreshReportSoon(it) } }
                         openFolder(dir)
                     }
                 },
