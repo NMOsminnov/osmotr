@@ -5,7 +5,7 @@ name: Установщик iPhone
 on:
   workflow_dispatch:
   push:
-    branches: [installer]
+    branches: [main, installer]
     paths: ["installer/**", "shared/**", "iosApp/**", ".github/workflows/installer.yml"]
 
 concurrency:
