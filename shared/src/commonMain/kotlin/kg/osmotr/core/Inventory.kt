@@ -370,6 +370,17 @@ object Inventory {
         return Table(sheet.name, hr ?: -1, headers.ifEmpty { List(width) { "" } }, columns, disputed, candidates, data.take(5), body = body, invFromName = fromName)
     }
 
+    /**
+     * Место предмета для экрана: без слова «подразделение»; общий раздел 1С («Основное
+     * подразделение») — не место, пусто (автор, 09.10.2026: «Какое ещё основное подразделение?
+     * Убирай слово подразделение»).
+     */
+    fun placeName(raw: String): String {
+        val t = raw.replace(Regex("""(?iu)подразделени[еяю]\s*:?"""), " ").replace(Regex("""\s+"""), " ").trim(' ', ':', ',', '-', '—')
+        return if (t.lowercase() in GENERIC_PLACES) "" else t
+    }
+    private val GENERIC_PLACES = setOf("", "основное", "главное", "общее", "основной", "основная")
+
     /** Предметы листа по выбранным столбцам; итоги, повторы шапки, «1 2 3…» и пустые строки пропускаются, разделы — местом. */
     fun items(sheet: Xlsx.Sheet, t: Table): List<Item> {
         fun cell(r: List<String>, f: Field) = t.columns[f]?.let { r.getOrElse(it) { "" } }.orEmpty().trim()
@@ -395,7 +406,7 @@ object Inventory {
                 priority = cell(r, Field.PRIORITY).let { s -> int(s) ?: priorityOf(s) },
                 status = cell(r, Field.LIST), row = i + 1,
                 qty = cell(r, Field.QUANTITY).let { s -> int(s) ?: s },
-                place = cell(r, Field.PLACE).ifEmpty { section },
+                place = placeName(cell(r, Field.PLACE).ifEmpty { section }),
             )
         }
         return out
@@ -582,7 +593,7 @@ object Inventory {
     @kotlinx.serialization.Serializable
     private class Cached(val items: List<Item>)
     private val json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
-    private fun cacheFile(f: File) = File(Store.cacheDir, "inventory/" + ("v4|" + f.absolutePath + "|" + f.length() + "|" + f.lastModified()).hashCode() + ".json")
+    private fun cacheFile(f: File) = File(Store.cacheDir, "inventory/" + ("v5|" + f.absolutePath + "|" + f.length() + "|" + f.lastModified()).hashCode() + ".json")
     private fun cached(f: File, cache: File): Parsed? = runCatching { if (cache.isFile) Parsed(f, json.decodeFromString<Cached>(cache.readText()).items) else null }.getOrNull()
 
     /**
