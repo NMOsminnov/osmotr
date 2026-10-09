@@ -293,6 +293,26 @@ class InventoryTest {
         assertTrue(!File(obj, Inventory.BROKEN).exists())
     }
 
+    @Test fun такие_же_это_наименование_и_цена() {
+        Store.init(root(), File(tmp.root.path + "/.app")); Store.ensureRoot()
+        val obj = Store.createFolder(Store.root, "Склад")!!
+        Xlsx.writeBook(File(obj, Inventory.PREFIX + "склад.xlsx"), listOf(Xlsx.Out("Опись", listOf(
+            listOf("№ п/п", "Основное средство", "Инв.Номер", "Первонач. Стоимость"),
+            listOf(1, "Монитор Dell P2419H", "555/1", 18500),
+            listOf(2, "Монитор Dell P2419H", "555/2", 18500),
+            listOf(3, "Монитор  dell p2419h", "555/3", 18500.004),  // пробелы, регистр, доли копейки — тот же
+            listOf(4, "Монитор Dell P2419H", "555/4", 21000),       // то же имя, другая цена — другой
+            listOf(5, "Монитор Dell P2419H", "555/5", null),        // без цены — не «такой же» ценовому
+        ))))
+        val items = Inventory.parse(Inventory.fileIn(obj)!!).items
+        val first = items.first { it.inventory == "555/1" }
+        val like = Inventory.similar(obj, listOf(first), Inventory.status(obj)).map { it.inventory }
+        assertEquals(listOf("555/2", "555/3"), like)
+        // Без цены — такие же те, что тоже без цены.
+        val noPrice = items.first { it.inventory == "555/5" }
+        assertEquals(emptyList<String>(), Inventory.similar(obj, listOf(noPrice), Inventory.status(obj)).map { it.inventory })
+    }
+
     @Test fun имя_описи_из_файла_или_из_книги() {
         Store.init(root(), File(tmp.root.path + "/.app")); Store.ensureRoot()
         val f = File(tmp.newFile("b.xlsx").path)

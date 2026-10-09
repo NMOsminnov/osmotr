@@ -787,13 +787,20 @@ object Inventory {
         return filesIn(obj).flatMap { parse(it).items }.filter { key(id(it)) in keys }
     }
 
-    /** Такие же в описи (то же наименование), ещё не в этой папке — «добавить сюда?». */
+    /**
+     * «Такой же» предмет — то же наименование **и та же цена** (автор 09.10.2026: «имя + цена»):
+     * одинаковое название при разной стоимости — разные вещи (другая комплектация, другой год).
+     * Цена — первоначальная стоимость, нет её — сумма; копейки сравниваются целыми.
+     */
+    fun likeKey(i: Item): String = Search.compact(i.name) + "|" + ((i.initial ?: i.sum)?.let { kotlin.math.round(it * 100).toLong() } ?: "")
+
+    /** Такие же в описи (наименование и цена), ещё не в этой папке — «добавить сюда?». */
     fun similar(obj: File, here: List<Item>, st: Status): List<Item> {
         if (here.isEmpty()) return emptyList()
-        val names = here.map { Search.compact(it.name) }.toSet()
+        val like = here.map(::likeKey).toSet()
         val inHere = here.map { key(id(it)) }.toSet()
         return filesIn(obj).flatMap { parse(it).items }
-            .filter { Search.compact(it.name) in names && key(id(it)) !in inHere && !st.inspected(it) }
+            .filter { likeKey(it) in like && key(id(it)) !in inHere && !st.inspected(it) }
     }
 
     // ---------- Отчёт ----------

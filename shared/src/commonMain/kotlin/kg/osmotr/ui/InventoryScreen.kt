@@ -216,8 +216,9 @@ fun InventoryScreen(obj: File, into: File? = null, initialQuery: String? = null,
             Sort.COST -> items.sortedByDescending { it.initial ?: it.sum ?: 0.0 }
         }
         first?.takeIf { target != null && q.isEmpty() }?.let { was ->
-            val keys = was.map { Search.compact(it.inventory) }.toSet(); val names = was.map { Search.compact(it.name) }.toSet()
-            items = items.sortedBy { if (Search.compact(it.inventory) in keys) 0 else if (Search.compact(it.name) in names) 1 else 2 }
+            // Сверху — что уже в папке, за ним — такие же (наименование и цена), потом остальное.
+            val keys = was.map { Search.compact(it.inventory) }.toSet(); val like = was.map(Inventory::likeKey).toSet()
+            items = items.sortedBy { if (Search.compact(it.inventory) in keys) 0 else if (Inventory.likeKey(it) in like) 1 else 2 }
         }
         items
         }
