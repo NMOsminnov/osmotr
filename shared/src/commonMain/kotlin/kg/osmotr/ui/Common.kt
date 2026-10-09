@@ -21,6 +21,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.foundation.border
+import androidx.compose.foundation.background
+import androidx.compose.ui.draw.clip
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -197,3 +200,13 @@ fun plural(n: Int, one: String, few: String, many: String): String {
  */
 fun <T> motion(): androidx.compose.animation.core.FiniteAnimationSpec<T> =
     androidx.compose.animation.core.tween(durationMillis = 220, easing = androidx.compose.animation.core.FastOutSlowInEasing)
+
+/**
+ * Панель — поверхность с тонкой гранью: карточка лежит на фоне, а не сливается с ним (автор о
+ * приложении APCS: «бедно, не хватает граней»). [tint] — своя заливка (опись — оттенком цвета).
+ */
+@Composable
+fun Modifier.panel(shape: androidx.compose.ui.graphics.Shape = androidx.compose.foundation.shape.RoundedCornerShape(18.dp),
+                   tint: androidx.compose.ui.graphics.Color? = null): Modifier =
+    this.then(Modifier.clip(shape)).background(tint ?: MaterialTheme.colorScheme.surface)
+        .border(1.dp, MaterialTheme.colorScheme.outlineVariant, shape)

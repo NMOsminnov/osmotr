@@ -10,3 +10,5 @@
 - `docs/ТЗ.md` — сценарии, требования, решения.
 
 Тесты: `./gradlew :app:testDebugUnitTest`, `cd web && npx vitest run`.
+
+Шрифт — Golos Text (SIL Open Font License 1.1, `docs/licenses/GolosText-OFL.txt`).

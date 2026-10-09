@@ -225,11 +225,22 @@ fun BrowserScreen(
                 },
             ) else TopAppBar(
                 navigationIcon = { if (back != null) IconButton(onClick = back) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Назад") } },
-                title = { Breadcrumbs(dir, goTo) },
+                // Папка предмета — заголовок сам предмет и его опись (касание — в опись), а не обрывок пути.
+                title = {
+                    val items = card?.items.orEmpty()
+                    val obj = card?.obj
+                    if (items.isNotEmpty() && obj != null) Column(Modifier.clip(RoundedCornerShape(8.dp)).clickable { inventory(obj) }.padding(horizontal = 2.dp)) {
+                        Text(items.first().inventory.ifEmpty { "№ ${items.first().number}" } + if (items.size > 1) " +${items.size - 1} шт" else "",
+                            style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text("Опись «${obj.name}»", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary,
+                            maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    } else Breadcrumbs(dir, goTo)
+                },
                 actions = {
+                    val itemFolder = !card?.items.isNullOrEmpty()
                     IconButton(onClick = search) { Icon(Icons.Default.Search, "Поиск") }
-                    IconButton(onClick = tree) { Icon(AppIcons.AccountTree, "Структура") }
-                    IconButton(onClick = { newFolder = true }) { Icon(AppIcons.CreateNewFolder, "Новая папка") }
+                    if (!itemFolder) IconButton(onClick = tree) { Icon(AppIcons.AccountTree, "Структура") }
+                    if (!itemFolder) IconButton(onClick = { newFolder = true }) { Icon(AppIcons.CreateNewFolder, "Новая папка") }
                     Box {
                         IconButton(onClick = { menu = true }) { Icon(Icons.Default.MoreVert, "Ещё") }
                         DropdownMenu(menu, { menu = false }) {
@@ -246,6 +257,11 @@ fun BrowserScreen(
                             Inventory.objectOf(dir)?.takeIf { it != dir }?.let { obj ->
                                 DropdownMenuItem({ Text("Предметы из описи") }, leadingIcon = { Icon(Icons.Default.Add, null) },
                                     onClick = { menu = false; pickItems(obj) })
+                            }
+                            // В папке предмета значков меньше — новая папка и структура здесь.
+                            if (!card?.items.isNullOrEmpty()) {
+                                DropdownMenuItem({ Text("Новая папка") }, leadingIcon = { Icon(AppIcons.CreateNewFolder, null) }, onClick = { menu = false; newFolder = true })
+                                DropdownMenuItem({ Text("Структура") }, leadingIcon = { Icon(AppIcons.AccountTree, null) }, onClick = { menu = false; tree() })
                             }
                             DropdownMenuItem({ Text("Отправить архивом") }, leadingIcon = { Icon(Icons.Default.Share, null) }, onClick = {
                                 menu = false
@@ -297,7 +313,7 @@ fun BrowserScreen(
             // В папке предмета или с описью — карточки вместо «пусто».
             if (l != null && l.folders.isEmpty() && l.photos.isEmpty() && card?.items.isNullOrEmpty() && card?.progress == null) Empty(dir == Store.root)
             LazyVerticalGrid(
-                columns = GridCells.Adaptive(88.dp),
+                columns = GridCells.Adaptive(104.dp),
                 state = grid,
                 // Зажал — отмечено; повёл, не отпуская, — отмечается всё по пути (снимки и папки).
                 modifier = Modifier.fillMaxSize().dragToSelect(grid, order, selected, afterLongPress),
@@ -307,7 +323,7 @@ fun BrowserScreen(
             ) {
                 note?.let { text ->
                     item(span = { GridItemSpan(maxLineSpan) }, key = "note", contentType = "note") {
-                        Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceVariant)
+                        Row(Modifier.fillMaxWidth().panel()
                             .clickable { editingNote = true }.padding(12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                             Icon(AppIcons.Notes, null, tint = MaterialTheme.colorScheme.secondary)
                             Text(text, style = MaterialTheme.typography.bodyMedium, maxLines = 6, overflow = TextOverflow.Ellipsis)
@@ -316,7 +332,7 @@ fun BrowserScreen(
                 }
                 card?.progress?.let { (done, total) ->
                     item(span = { GridItemSpan(maxLineSpan) }, key = "inventory", contentType = "inventory") {
-                        Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.primary.copy(alpha = 0.16f))
+                        Column(Modifier.fillMaxWidth().panel(tint = MaterialTheme.colorScheme.primaryContainer)
                             .clickable { inventory(dir) }.padding(12.dp)) {
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                                 Icon(AppIcons.Checklist, null, tint = MaterialTheme.colorScheme.primary)
@@ -340,7 +356,7 @@ fun BrowserScreen(
                     }
                 }
                 if (people.isNotEmpty()) item(span = { GridItemSpan(maxLineSpan) }, key = "people", contentType = "people") {
-                    Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceVariant)
+                    Row(Modifier.fillMaxWidth().panel()
                         .clickable(onClick = contacts).padding(12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp),
                         verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Default.Person, null, tint = MaterialTheme.colorScheme.secondary)
@@ -452,34 +468,22 @@ private fun Breadcrumbs(dir: File, goTo: (File) -> Unit) {
 
 @Composable
 private fun FolderCard(tile: Store.FolderTile, selected: Boolean, onClick: () -> Unit) {
-    val host = LocalHost.current
-    Box(Modifier.aspectRatio(1f).clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceVariant).clickable(onClick = onClick)) {
-        tile.cover?.let { cover ->
-            AsyncImage(
-                thumbRequest(cover),
-                contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize(),
-            )
+    // Снимок сверху, подпись под ним: имя поверх пёстрой обложки не читалось.
+    val shape = RoundedCornerShape(16.dp)
+    Column(Modifier.panel(shape, tint = if (selected) MaterialTheme.colorScheme.primaryContainer else null).clickable(onClick = onClick)) {
+        Box(Modifier.fillMaxWidth().aspectRatio(1.25f).background(MaterialTheme.colorScheme.surfaceVariant), contentAlignment = Alignment.Center) {
+            tile.cover?.let { cover ->
+                AsyncImage(thumbRequest(cover), contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+            } ?: Icon(AppIcons.Folder, null, Modifier.size(36.dp), tint = MaterialTheme.colorScheme.secondary)
+            if (tile.note != null) Icon(AppIcons.Notes, "Есть комментарий", Modifier.align(Alignment.TopStart).padding(6.dp)
+                .clip(RoundedCornerShape(8.dp)).background(Color.Black.copy(alpha = 0.45f)).padding(3.dp).size(16.dp), tint = Color.White)
+            if (selected) Icon(Icons.Default.CheckCircle, null, Modifier.align(Alignment.TopEnd).padding(4.dp), tint = MaterialTheme.colorScheme.primary)
         }
-        Box(Modifier.fillMaxSize().background(Brush.verticalGradient(0.35f to Color.Transparent, 1f to Color.Black.copy(alpha = 0.85f))))
-        Row(Modifier.padding(8.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-            Icon(AppIcons.Folder, null, Modifier.size(22.dp), tint = MaterialTheme.colorScheme.secondary)
-            if (tile.note != null) Icon(AppIcons.Notes, "Есть комментарий", Modifier.size(20.dp), tint = Color.White)
-        }
-        Column(Modifier.align(Alignment.BottomStart).padding(8.dp)) {
-            Text(tile.dir.name, color = Color.White, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis,
-                style = MaterialTheme.typography.bodyMedium)
-            Text(
-                listOfNotNull(
-                    plural(tile.photos, "фото", "фото", "фото"),
-                    tile.folders.takeIf { it > 0 }?.let { plural(it, "папка", "папки", "папок") },
-                ).joinToString(" · "),
-                color = Color.White.copy(alpha = 0.75f), style = MaterialTheme.typography.labelSmall,
-            )
-        }
-        // Выбрана — рамка и отметка, без заливки: подпись на обложке остаётся читаемой.
-        if (selected) {
-            Box(Modifier.fillMaxSize().border(3.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(12.dp)))
-            Icon(Icons.Default.CheckCircle, null, Modifier.align(Alignment.TopEnd).padding(4.dp), tint = MaterialTheme.colorScheme.primary)
+        Column(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp)) {
+            Text(tile.dir.name, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                style = MaterialTheme.typography.bodySmall, minLines = 2)
+            Text(listOfNotNull(plural(tile.photos, "фото", "фото", "фото"), tile.folders.takeIf { it > 0 }?.let { plural(it, "папка", "папки", "папок") })
+                .joinToString(" · "), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall, maxLines = 1)
         }
     }
 }
@@ -487,8 +491,7 @@ private fun FolderCard(tile: Store.FolderTile, selected: Boolean, onClick: () ->
 /** Опись — строкой во всю ширину: название, сколько осмотрено, полоса; касание — сразу в опись. */
 @Composable
 private fun InventoryRow(tile: Store.FolderTile, selected: Boolean, progress: Pair<Int, Int>?, onClick: () -> Unit) {
-    Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
-        .background(if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.3f) else MaterialTheme.colorScheme.primary.copy(alpha = 0.14f))
+    Row(Modifier.fillMaxWidth().panel(tint = if (selected) MaterialTheme.colorScheme.primaryContainer else null)
         .clickable(onClick = onClick).padding(14.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         Icon(if (selected) Icons.Default.CheckCircle else AppIcons.Checklist, null, Modifier.size(28.dp), tint = MaterialTheme.colorScheme.primary)
@@ -498,9 +501,9 @@ private fun InventoryRow(tile: Store.FolderTile, selected: Boolean, progress: Pa
             else {
                 val (done, total) = progress
                 Text("осмотрено $done из $total · " + plural(tile.photos, "фото", "фото", "фото"),
-                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 LinearProgressIndicator(progress = { if (total == 0) 0f else done.toFloat() / total }, Modifier.fillMaxWidth().padding(top = 6.dp),
-                    color = Color(0xFF3FB950))
+                    color = DONE_GREEN)
             }
         }
         Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -524,7 +527,7 @@ private class AfterLongPress { var skip = false }
 private fun ItemCard(items: List<Inventory.Item>, similar: List<Inventory.Item>, pick: () -> Unit, add: (List<Inventory.Item>) -> Unit, remove: (Inventory.Item) -> Unit,
                      leaving: List<String>, shot: (Inventory.Item) -> Boolean, broken: (Inventory.Item) -> Boolean, setBroken: (Inventory.Item, Boolean) -> Unit) {
     // Состав меняется плавно: карточка растёт и сжимается, убранный уезжает, а не пропадает.
-    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceVariant)
+    Column(Modifier.fillMaxWidth().panel()
         .animateContentSize(motion()).padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         // Последний оставшийся — без «убрать»: папка без предмета не бывает.
         val staying = items.count { Inventory.key(Inventory.id(it)) !in leaving }
@@ -542,7 +545,8 @@ private fun ItemCard(items: List<Inventory.Item>, similar: List<Inventory.Item>,
                     if (cost.isNotEmpty()) Text(cost.joinToString(" · "), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     // Нерабочее (на списание) — одним касанием, тут же и снять; только после снимков.
                     val off = broken(i); val can = shot(i)
-                    FilterChip(off, { setBroken(i, !off) }, {
+                    val haptic = LocalHapticFeedback.current
+                    FilterChip(off, { haptic.performHapticFeedback(if (off) HapticFeedbackType.ToggleOff else HapticFeedbackType.ToggleOn); setBroken(i, !off) }, {
                         Text(when { off -> "Нерабочее, на списание"; can -> "Отметить: нерабочее"; else -> "Нерабочее — сначала снимки" },
                             color = if (off) BROKEN_RED else Color.Unspecified)
                     }, enabled = can || off,
@@ -554,7 +558,7 @@ private fun ItemCard(items: List<Inventory.Item>, similar: List<Inventory.Item>,
           }
         } }
         if (similar.isNotEmpty()) TextButton(onClick = { add(similar) }) {
-            Icon(Icons.Default.Add, null); Text("  Ещё такие же в описи: ${similar.size} — сюда же")
+            Icon(Icons.Default.Add, null); Text("  Такие же в описи: ${similar.size} — добавить сюда")
         }
         // Вручную — по всему списку описи: отметить, что ещё лежит в этой папке.
         TextButton(onClick = pick) { Icon(AppIcons.Checklist, null); Text("  Добавить из описи") }
@@ -757,7 +761,7 @@ fun ImportDialog(jobs: List<ImportJob>, onClose: () -> Unit) {
                         when (j.state) {
                             ImportJob.State.WAITING -> Text("в очереди", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             ImportJob.State.WORKING -> ParseProgress(null, compact = true, file = j.file ?: File("/нет"))
-                            ImportJob.State.DONE -> Text("✓ ${plural(j.items, "предмет", "предмета", "предметов")}", style = MaterialTheme.typography.bodySmall, color = Color(0xFF3FB950))
+                            ImportJob.State.DONE -> Text("✓ ${plural(j.items, "предмет", "предмета", "предметов")}", style = MaterialTheme.typography.bodySmall, color = DONE_GREEN)
                             ImportJob.State.FAILED -> Text("✗ ${j.error}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
                         }
                     }

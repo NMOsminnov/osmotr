@@ -59,6 +59,23 @@ import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.expandVertically
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.lifecycle.compose.LifecycleEventEffect
+import androidx.lifecycle.Lifecycle
+import androidx.compose.material3.FilledTonalIconButton
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
@@ -90,8 +107,11 @@ private class InventoryView {
     var priority by mutableStateOf<String?>(null)
     var onlyLeft by mutableStateOf(false)
     var onlyBroken by mutableStateOf(false)
+    var more by mutableStateOf(false)
     var sort by mutableStateOf(Sort.NUMBER)
     val scroll = LazyListState()
+    /** Сняли из списка — по возвращении поиск снова под пальцем: следующая бирка. */
+    var refocus = false
 }
 private val views = HashMap<File, InventoryView>()
 
@@ -139,6 +159,12 @@ fun InventoryScreen(obj: File, into: File? = null, initialQuery: String? = null,
         } }
     }
     val selected = remember(obj) { mutableStateListOf<Inventory.Item>() }
+    val focus = remember { FocusRequester() }
+    val haptic = LocalHapticFeedback.current
+    // Вернулись из камеры, снимали из списка — поиск снова в фокусе, клавиатура открыта: следующая бирка.
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+        if (v.refocus) { v.refocus = false; runCatching { focus.requestFocus() }; keyboard?.show() }
+    }
     var importing by remember { mutableStateOf(false) }
     var menu by remember { mutableStateOf(false) }
     var exporting by remember { mutableStateOf(false) }
@@ -303,47 +329,19 @@ fun InventoryScreen(obj: File, into: File? = null, initialQuery: String? = null,
                     Button(onClick = ::load) { Icon(AppIcons.UploadFile, null); Text("  Загрузить опись") }
                 }
                 else -> {
-                    // Поиск — первым: номер с бирки набирается сразу.
-                    TextField(v.query, { v.query = it }, Modifier.fillMaxWidth().padding(horizontal = 8.dp), singleLine = true,
-                        leadingIcon = { Icon(Icons.Default.Search, null) },
-                        trailingIcon = { if (v.query.isNotEmpty()) IconButton(onClick = { v.query = "" }) { Icon(Icons.Default.Close, "Очистить") } },
-                        placeholder = { Text("Инв. № или название", maxLines = 1) },
-                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search), keyboardActions = KeyboardActions(onSearch = { keyboard?.hide() }),
-                        colors = TextFieldDefaults.colors(focusedContainerColor = Color.Transparent, unfocusedContainerColor = Color.Transparent))
+                    // Поиск — первым и всегда на месте: номер с бирки набирается сразу.
+                    SearchCapsule(v.query, { v.query = it }, focus, onDone = { keyboard?.hide() })
                     val scope2 = all.filter { (v.list == null || it.list == v.list) && (v.status == null || it.status == v.status) }
-                    val done = scope2.count { st?.inspected(it) == true }
-                    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp)) {
-                        val today = scope2.count { st?.today(it) == true }
-                        // Нерабочих — на красном фильтре ниже: в строке рядом с «сегодня +N» число обрезалось.
-                        Text("Осмотрено $done из ${scope2.size}" + if (today > 0) " · сегодня +$today" else "",
-                            style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        LinearProgressIndicator(progress = { if (scope2.isEmpty()) 0f else done.toFloat() / scope2.size }, Modifier.fillMaxWidth().padding(top = 4.dp))
-                    }
-                    // По приоритетам: «П1 5/7»; касание — только этот приоритет в списке.
-                    val byPriority = scope2.groupBy { it.priority }.filterKeys { it.isNotEmpty() }.entries.sortedWith(compareBy({ it.key.toIntOrNull() ?: Int.MAX_VALUE }, { it.key })).associate { it.key to it.value }
-                    if (byPriority.isNotEmpty()) Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        byPriority.forEach { (p, items) ->
-                            val ok = items.count { st?.inspected(it) == true }
-                            FilterChip(v.priority == p, { v.priority = if (v.priority == p) null else p }, {
-                                Text("П$p  $ok/${items.size}", color = if (ok == items.size) Color(0xFF3FB950) else Color.Unspecified)
-                            })
-                        }
-                    }
-                    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        // Порядок — одной кнопкой: касание — следующий (№ → приоритет → стоимость).
-                        if (v.query.isBlank()) FilterChip(true, { v.sort = Sort.entries[(v.sort.ordinal + 1) % Sort.entries.size] },
-                            { Text(v.sort.title) })  // стрелку «↕» iPhone рисует смайликом
-                        FilterChip(v.onlyLeft, { v.onlyLeft = !v.onlyLeft }, { Text("Не осмотрено") })
-                        // Нерабочие — когда есть хоть один (или фильтр уже включён).
-                        val brokenHere = scope2.count { st?.broken(it) == true }
-                        if (brokenHere > 0 || v.onlyBroken) FilterChip(v.onlyBroken, { v.onlyBroken = !v.onlyBroken }, { Text("Нерабочие $brokenHere", color = BROKEN_RED) })
-                        val lists = all.map { it.list }.distinct()
-                        if (lists.size > 1) lists.forEach { l -> FilterChip(v.list == l, { v.list = if (v.list == l) null else l }, { Text(l) }) }
-                        all.filter { v.list == null || it.list == v.list }.map { it.status }.filter { it.isNotEmpty() }.distinct().takeIf { it.size > 1 }
-                            ?.forEach { s -> FilterChip(v.status == s, { v.status = if (v.status == s) null else s }, { Text(s) }) }
-                    }
                     LazyColumn(Modifier.fillMaxSize(), state = v.scroll, contentPadding = PaddingValues(bottom = 96.dp)) {
+                        // Сколько осмотрено и отбор — уезжают вместе со списком, а не держат треть экрана;
+                        // ищут — вместо них одна строка: сколько нашлось.
+                        if (v.query.isBlank()) item(key = "head", contentType = "head") {
+                            InventoryHead(scope2, st, v, all)
+                        } else item(key = "found", contentType = "found") {
+                            Text(if (shown.isEmpty()) "Не найдено" else "Найдено: ${shown.size}", Modifier.animateItem(fadeInSpec = motion(), placementSpec = motion(), fadeOutSpec = motion())
+                                .padding(horizontal = 16.dp, vertical = 8.dp), style = MaterialTheme.typography.labelLarge,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
                         // Ищут, а в описи нет (или нашлось не то) — своя папка с названием от человека.
                         if (target == null && v.query.isNotBlank() && shown.isEmpty()) item(key = "none") {
                             Column(Modifier.fillMaxWidth().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -376,21 +374,23 @@ fun InventoryScreen(obj: File, into: File? = null, initialQuery: String? = null,
                                 )
                                 .padding(horizontal = 12.dp, vertical = 8.dp),
                                 verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                                // Осмотрено — зелёная отметка с числом снимков; нет — пустой кружок.
-                                Box(Modifier.size(34.dp), contentAlignment = Alignment.Center) {
+                                // Осмотрено — зелёная отметка с числом снимков; нет — тихая точка (не кружок
+                                // выбора: тот читался как «отметить»).
+                                Box(Modifier.size(30.dp), contentAlignment = Alignment.Center) {
                                     if (target != null) Icon(if (here) AppIcons.CheckBox else AppIcons.CheckBoxOutlineBlank,
                                         if (here) "В этой папке" else "Не в этой папке",
                                         tint = if (here) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
                                     else if (n > 0) {
-                                        Icon(Icons.Default.CheckCircle, "Осмотрено", tint = Color(0xFF3FB950), modifier = Modifier.size(26.dp))
-                                        Text("$n", Modifier.align(Alignment.BottomEnd), style = MaterialTheme.typography.labelSmall, color = Color(0xFF3FB950))
-                                    } else Icon(AppIcons.RadioButtonUnchecked, "Не осмотрено", tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f))
+                                        Icon(Icons.Default.CheckCircle, "Осмотрено", tint = DONE_GREEN, modifier = Modifier.size(24.dp))
+                                        Text("$n", Modifier.align(Alignment.BottomEnd), style = MaterialTheme.typography.labelSmall, color = DONE_GREEN)
+                                    } else Box(Modifier.size(7.dp).clip(androidx.compose.foundation.shape.CircleShape)
+                                        .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f)))
                                 }
                                 Column(Modifier.weight(1f)) {
                                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                         Text(i.number, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                        Text(i.inventory.ifEmpty { "без инв. №" }, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                        if (i.priority.isNotEmpty()) Text("П${i.priority}", Modifier.clip(RoundedCornerShape(6.dp))
+                                        Text(i.inventory.ifEmpty { "без инв. №" }, Modifier.weight(1f, fill = false), fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                        if (i.priority.isNotEmpty()) Text("П${i.priority}", softWrap = false, maxLines = 1, modifier = Modifier.clip(RoundedCornerShape(6.dp))
                                             .background(MaterialTheme.colorScheme.secondary.copy(alpha = 0.2f)).padding(horizontal = 6.dp),
                                             style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.secondary)
                                         if (st?.broken(i) == true) BrokenLabel()
@@ -405,6 +405,15 @@ fun InventoryScreen(obj: File, into: File? = null, initialQuery: String? = null,
                                     elsewhere?.let { Text("сейчас в папке «${it.name}»", style = MaterialTheme.typography.labelSmall,
                                         color = MaterialTheme.colorScheme.secondary, maxLines = 1, overflow = TextOverflow.Ellipsis) }
                                 }
+                                // Снять — сразу в камеру, не заходя в папку: нашёл по бирке — снял — следующая.
+                                if (target == null && selected.isEmpty()) FilledTonalIconButton(onClick = {
+                                    haptic.performHapticFeedback(HapticFeedbackType.ContextClick)
+                                    keyboard?.hide(); if (v.query.isNotBlank()) v.query = ""; v.refocus = true
+                                    scope.launch {
+                                        val dir = withContext(Dispatchers.IO) { Inventory.openFolder(obj, i) }
+                                        ShootFrom.list = dir; host.takePhotos(dir)
+                                    }
+                                }, Modifier.size(48.dp)) { Icon(AppIcons.CameraAlt, "Снять") }
                             }
                         }
                         if (target == null && v.query.isNotBlank() && shown.isNotEmpty()) item(key = "other") {
@@ -538,9 +547,114 @@ fun ParseProgress(dir: File?, modifier: Modifier = Modifier, compact: Boolean = 
 
 
 
-/** Красный «нерабочих» — тот же оттенок в описи, в папке предмета и на кнопках. */
-val BROKEN_RED = Color(0xFFF85149)
 
 @Composable
 fun BrokenLabel() = Text("нерабочее", Modifier.clip(RoundedCornerShape(6.dp)).background(BROKEN_RED.copy(alpha = 0.2f)).padding(horizontal = 6.dp),
     style = MaterialTheme.typography.labelSmall, color = BROKEN_RED, maxLines = 1)
+
+
+/** Сняли из списка описи: в эту папку — по возвращении остаться в списке и сказать, что легло. */
+object ShootFrom { var list: File? = null }
+
+/**
+ * Клавиатура поиска: цифры (бирки — в основном цифры, разделители не нужны) или буквы. Цифры —
+ * раскладкой «телефон»: обычную «число» Gboard на части телефонов показывает буквами.
+ */
+private object SearchKeys { var digits by mutableStateOf(true) }
+
+/**
+ * Поиск описи — капсулой: что искать, очистить и переключатель клавиатуры «123 / АБВ». По
+ * умолчанию — цифры: номер с бирки набирается сразу, без переключения на цифровой ряд.
+ */
+@Composable
+private fun SearchCapsule(query: String, onQuery: (String) -> Unit, focus: FocusRequester, onDone: () -> Unit) {
+    val digits = SearchKeys.digits
+    Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp).height(52.dp)
+        .clip(androidx.compose.foundation.shape.CircleShape).background(MaterialTheme.colorScheme.surfaceVariant)
+        .padding(start = 16.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+        Icon(Icons.Default.Search, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        Box(Modifier.weight(1f).padding(horizontal = 12.dp), contentAlignment = Alignment.CenterStart) {
+            if (query.isEmpty()) Text(if (digits) "Номер с бирки" else "Номер или название", color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodyLarge, maxLines = 1)
+            androidx.compose.foundation.text.BasicTextField(query, onQuery, Modifier.fillMaxWidth().focusRequester(focus), singleLine = true,
+                textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface),
+                cursorBrush = androidx.compose.ui.graphics.SolidColor(MaterialTheme.colorScheme.primary),
+                keyboardOptions = KeyboardOptions(keyboardType = if (digits) KeyboardType.Phone else KeyboardType.Text, imeAction = ImeAction.Search),
+                keyboardActions = KeyboardActions(onSearch = { onDone() }))
+        }
+        AnimatedVisibility(query.isNotEmpty(), enter = fadeIn(motion()) + scaleIn(motion()), exit = fadeOut(motion()) + scaleOut(motion())) {
+            IconButton(onClick = { onQuery("") }) { Icon(Icons.Default.Close, "Очистить") }
+        }
+        // Клавиатура: цифры ↔ буквы (Б-370, F000… — с буквами).
+        TextButton(onClick = { SearchKeys.digits = !digits; runCatching { focus.requestFocus() } }, Modifier.height(40.dp)) {
+            Text(if (digits) "АБВ" else "123", style = MaterialTheme.typography.labelLarge)
+        }
+    }
+}
+
+/**
+ * Шапка описи в самом списке: сколько осмотрено (и сегодня), приоритеты «П1 5/7» и отбор. Ряды —
+ * переносом строк, а не лентой за край (автор: «обрубать интерфейс в никуда — плохая затея»).
+ */
+@OptIn(ExperimentalMaterial3Api::class, androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+private fun InventoryHead(scope2: List<Inventory.Item>, st: Inventory.Status?, v: InventoryView, all: List<Inventory.Item>) {
+    val done = scope2.count { st?.inspected(it) == true }
+    val today = scope2.count { st?.today(it) == true }
+    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(top = 4.dp, bottom = 8.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Column {
+            Row(verticalAlignment = Alignment.Bottom) {
+                Text("$done", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
+                Text(" из ${scope2.size} осмотрено", Modifier.weight(1f).padding(bottom = 3.dp), style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                // «сегодня +N» — целиком, не рвётся на крупном шрифте.
+                if (today > 0) Text("сегодня +$today", Modifier.padding(start = 8.dp, bottom = 3.dp), style = MaterialTheme.typography.labelLarge,
+                    color = DONE_GREEN, softWrap = false, maxLines = 1)
+            }
+            LinearProgressIndicator(progress = { if (scope2.isEmpty()) 0f else done.toFloat() / scope2.size },
+                Modifier.fillMaxWidth().padding(top = 6.dp).height(6.dp).clip(androidx.compose.foundation.shape.CircleShape),
+                color = DONE_GREEN, trackColor = MaterialTheme.colorScheme.surfaceVariant, drawStopIndicator = {})
+        }
+        androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(0.dp)) {
+            // По приоритетам: «П1 5/7»; касание — только этот приоритет в списке.
+            scope2.groupBy { it.priority }.filterKeys { it.isNotEmpty() }.entries.sortedWith(compareBy({ it.key.toIntOrNull() ?: Int.MAX_VALUE }, { it.key }))
+                .forEach { (p, items) ->
+                    val ok = items.count { st?.inspected(it) == true }
+                    FilterChip(v.priority == p, { v.priority = if (v.priority == p) null else p }, {
+                        Text("П$p  $ok/${items.size}", color = if (ok == items.size) DONE_GREEN else Color.Unspecified)
+                    }, shape = androidx.compose.foundation.shape.CircleShape)
+                }
+            // Порядок — одной кнопкой: касание — следующий (№ → приоритет → стоимость).
+            FilterChip(true, { v.sort = Sort.entries[(v.sort.ordinal + 1) % Sort.entries.size] }, { Text(v.sort.title) },
+                shape = androidx.compose.foundation.shape.CircleShape)  // стрелку «↕» iPhone рисует смайликом
+            FilterChip(v.onlyLeft, { v.onlyLeft = !v.onlyLeft }, { Text("Не осмотрено") }, shape = androidx.compose.foundation.shape.CircleShape)
+            // Нерабочие — когда есть хоть один (или фильтр уже включён).
+            val brokenHere = scope2.count { st?.broken(it) == true }
+            if (brokenHere > 0 || v.onlyBroken) FilterChip(v.onlyBroken, { v.onlyBroken = !v.onlyBroken }, { Text("Нерабочие $brokenHere", color = BROKEN_RED) },
+                shape = androidx.compose.foundation.shape.CircleShape)
+            // Списки и статусы описи — реже нужны: за «Ещё отбор», иначе шапка в шесть строк.
+            val lists = all.map { it.list }.distinct().takeIf { it.size > 1 }.orEmpty()
+            val statuses = all.filter { v.list == null || it.list == v.list }.map { it.status }.filter { it.isNotEmpty() }.distinct().takeIf { it.size > 1 }.orEmpty()
+            val chosen = listOfNotNull(v.list, v.status).size
+            if (lists.isNotEmpty() || statuses.isNotEmpty()) FilterChip(v.more || chosen > 0, { v.more = !v.more },
+                { Text(if (v.more) "Скрыть" else if (chosen > 0) "Отбор: $chosen" else "Ещё отбор") },
+                trailingIcon = { Icon(if (v.more) AppIcons.UnfoldLess else AppIcons.UnfoldMore, null, Modifier.size(18.dp)) },
+                shape = androidx.compose.foundation.shape.CircleShape)
+        }
+        AnimatedVisibility(v.more, enter = fadeIn(motion()) + expandVertically(motion()), exit = fadeOut(motion()) + shrinkVertically(motion())) {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                val lists = all.map { it.list }.distinct().takeIf { it.size > 1 }.orEmpty()
+                val statuses = all.filter { v.list == null || it.list == v.list }.map { it.status }.filter { it.isNotEmpty() }.distinct().takeIf { it.size > 1 }.orEmpty()
+                if (lists.isNotEmpty()) MoreGroup("Список") { lists.forEach { l -> FilterChip(v.list == l, { v.list = if (v.list == l) null else l }, { Text(l) }, shape = androidx.compose.foundation.shape.CircleShape) } }
+                if (statuses.isNotEmpty()) MoreGroup("Статус") { statuses.forEach { s -> FilterChip(v.status == s, { v.status = if (v.status == s) null else s }, { Text(s) }, shape = androidx.compose.foundation.shape.CircleShape) } }
+            }
+        }
+    }
+}
+
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+private fun MoreGroup(title: String, chips: @Composable () -> Unit) = Column {
+    Text(title, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) { chips() }
+}

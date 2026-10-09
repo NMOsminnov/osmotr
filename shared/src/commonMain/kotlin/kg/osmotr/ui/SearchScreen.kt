@@ -119,14 +119,14 @@ private fun Result(hit: Search.Hit, query: String, onClick: () -> Unit) {
         horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.CenterVertically) {
         Icon(AppIcons.Folder, null, Modifier.size(28.dp), tint = MaterialTheme.colorScheme.secondary)
         Column(Modifier.weight(1f)) {
-            Text(marked(e.name, query), style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Text(marked(e.name, query, MaterialTheme.colorScheme.primary), style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
             Text(listOf(e.where, plural(e.photos, "фото", "фото", "фото")).joinToString(" · "),
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1,
                 overflow = TextOverflow.StartEllipsis)
             hit.noteLine?.let { line ->
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     Icon(AppIcons.Notes, null, Modifier.size(14.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text(marked(line, query), style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(marked(line, query, MaterialTheme.colorScheme.primary), style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
         }
@@ -146,9 +146,9 @@ private fun ItemResult(e: Search.ItemEntry, query: String, onClick: () -> Unit) 
         horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.CenterVertically) {
         Icon(AppIcons.Checklist, null, Modifier.size(28.dp), tint = MaterialTheme.colorScheme.primary)
         Column(Modifier.weight(1f)) {
-            Text(marked("${i.inventory}  ·  № ${i.number}" + if (i.priority.isNotEmpty()) "  ·  П${i.priority}" else "", query),
+            Text(marked("${i.inventory}  ·  № ${i.number}" + if (i.priority.isNotEmpty()) "  ·  П${i.priority}" else "", query, MaterialTheme.colorScheme.primary),
                 style = MaterialTheme.typography.titleSmall, maxLines = 1)
-            Text(marked(i.name, query), style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Text(marked(i.name, query, MaterialTheme.colorScheme.primary), style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
             Text(listOfNotNull(Store.title(e.obj), i.list, i.initial?.let { money(it) }).joinToString(" · "),
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
@@ -156,13 +156,13 @@ private fun ItemResult(e: Search.ItemEntry, query: String, onClick: () -> Unit) 
 }
 
 /** Выделить в [text] слова запроса — видно, почему папка нашлась. */
-private fun marked(text: String, query: String): AnnotatedString = buildAnnotatedString {
+private fun marked(text: String, query: String, hit: Color): AnnotatedString = buildAnnotatedString {
     append(text)
     val low = Search.norm(text)
     Search.norm(query).split(Regex("""\s+""")).filter { it.isNotEmpty() }.forEach { t ->
         var i = low.indexOf(t)
         while (i >= 0) {
-            addStyle(SpanStyle(fontWeight = FontWeight.Bold, color = Color(0xFFFFC857)), i, i + t.length)
+            addStyle(SpanStyle(fontWeight = FontWeight.Bold, color = hit), i, i + t.length)
             i = low.indexOf(t, i + t.length)
         }
     }

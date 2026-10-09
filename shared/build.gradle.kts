@@ -27,6 +27,7 @@ kotlin {
             implementation(compose.runtime)
             implementation(compose.foundation)
             implementation(compose.material3)
+            implementation(compose.components.resources)
             implementation(libs.okio)
             implementation(libs.kotlinx.serialization.json)
             implementation(libs.atomicfu)
@@ -50,4 +51,10 @@ kotlin {
 tasks.withType<Test>().configureEach {
     // Набор кривых описей — тот же, что у Android-тестов.
     systemProperty("templates", rootProject.file("shared/src/jvmTest/resources/templates").absolutePath)
+}
+
+// Шрифт и прочие ресурсы общего кода — класс Res в своём пакете, наружу не виден.
+compose.resources {
+    packageOfResClass = "kg.osmotr.ui.res"
+    publicResClass = false
 }

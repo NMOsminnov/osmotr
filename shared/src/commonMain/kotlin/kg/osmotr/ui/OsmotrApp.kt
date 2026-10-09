@@ -7,6 +7,8 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
@@ -65,10 +67,7 @@ sealed interface Screen {
  */
 @Composable
 fun OsmotrApp(host: Host, incoming: SnapshotStateList<Picked>, start: List<Screen> = emptyList()) {
-    MaterialTheme(colorScheme = darkColorScheme(
-        primary = Color(0xFF2F81F7), onPrimary = Color.White, secondary = Color(0xFFFFC857),
-        background = Color(0xFF0E1116), surface = Color(0xFF161B22), surfaceVariant = Color(0xFF21262D),
-    )) {
+    OsmotrTheme {
         Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
             CompositionLocalProvider(LocalHost provides host) { Body(host, incoming, start) }
         }
@@ -113,6 +112,18 @@ private fun Body(host: Host, incoming: SnapshotStateList<Picked>, start: List<Sc
             val got = host.afterResume() ?: return@launch
             // Снятое по описи — отчёт «осмотрено / нет» обновляется сам.
             if (got.count > 0) launch(Dispatchers.IO) { Inventory.refreshReportSoon(got.dir) }
+            // Снимали из списка описи — остаться в нём (следующая бирка), а что легло — плашкой с «Открыть».
+            if (ShootFrom.list == got.dir) {
+                ShootFrom.list = null
+                if (got.count > 0) {
+                    // Прежняя плашка (прошлый предмет) пережила уход в камеру — убрать: сказать про этот.
+                    snackbar.currentSnackbarData?.dismiss()
+                    val r = snackbar.showSnackbar("${got.dir.name}: +${plural(got.count, "снимок", "снимка", "снимков")}", actionLabel = "Открыть")
+                    if (r == SnackbarResult.ActionPerformed) stack.add(Screen.Browser(got.dir))
+                }
+                return@launch
+            }
+            ShootFrom.list = null
             val top = stack.last()
             if (top !is Screen.Browser || top.dir != got.dir) stack.add(Screen.Browser(got.dir))
         }
@@ -167,7 +178,9 @@ private fun Body(host: Host, incoming: SnapshotStateList<Picked>, start: List<Sc
             is Screen.Contacts -> ContactsScreen(dir = top.dir, close = { pop() })
             is Screen.Viewer -> ViewerScreen(dir = top.dir, start = top.start, close = { pop() })
         }
-        SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = 88.dp))
+        // Над клавиатурой: вернулись из камеры в список — клавиатура уже открыта под следующую бирку.
+        val keys = androidx.compose.foundation.layout.WindowInsets.ime.getBottom(androidx.compose.ui.platform.LocalDensity.current) > 0
+        SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).navigationBarsPadding().imePadding().padding(bottom = if (keys) 8.dp else 88.dp))
     }
 }
 
