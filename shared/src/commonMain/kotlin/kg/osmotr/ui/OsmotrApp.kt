@@ -102,6 +102,8 @@ private fun Body(host: Host, incoming: SnapshotStateList<Picked>, start: List<Sc
         Store.changed()
         // Описи кучей в одной папке или прямо в корне (прежние версии, файлы по USB) — по своим папкам.
         scope.launch(Dispatchers.IO) { runCatching { Inventory.migrate() } }
+        // Отчёты, которые не успели собраться до закрытия, — собрать (отчёт в папке держим свежим).
+        scope.launch(Dispatchers.IO) { runCatching { Inventory.resumeReports() } }
         while (stack.size > 1 && stack.last().let { it is Screen.Browser && !it.dir.isDirectory }) stack.removeAt(stack.lastIndex)
         (stack.last() as? Screen.Browser)?.let { top ->
             if (!top.dir.isDirectory) stack[stack.lastIndex] = Screen.Browser(generateSequence(top.dir) { it.parentFile }.first { it.isDirectory || it == Store.root })

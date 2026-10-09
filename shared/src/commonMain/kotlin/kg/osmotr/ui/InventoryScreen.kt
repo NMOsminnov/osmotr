@@ -78,6 +78,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -130,6 +131,12 @@ fun InventoryScreen(obj: File, into: File? = null, initialQuery: String? = null,
             // Отчёт — свежий, но в фоне: список не ждёт его секунды.
             Data(Inventory.filesIn(obj).map { Inventory.parse(it) }, Inventory.status(obj)).also { Inventory.refreshReportSoon(obj) }
         }
+        // Поиск — приготовить заранее, пока человек смотрит список.
+        value?.let { d -> withContext(Dispatchers.Default) {
+            val t0 = Platform.nowMs(); val items = d.parsed.flatMap { it.items }
+            Search.prepare(items)
+            Platform.log("поиск готов: ${items.size} предметов, ${Platform.nowMs() - t0} мс")
+        } }
     }
     val selected = remember(obj) { mutableStateListOf<Inventory.Item>() }
     var importing by remember { mutableStateOf(false) }
@@ -207,8 +214,12 @@ fun InventoryScreen(obj: File, into: File? = null, initialQuery: String? = null,
         if (q.isNotEmpty()) {
             // Номер с бирки, инвентарник — без разделителей; название и место — по ключевым словам
             // в любом порядке, с опечатками; точное — первым.
-            items = items.mapNotNull { i -> Search.scoreItem(i, q).takeIf { it > 0 }?.let { i to it } }
+            // Набрали следующую букву — прежний проход бросить, а не досчитывать рядом с новым.
+            val t0 = Platform.nowMs()
+            val match = Search.matcher(q)
+            items = items.mapNotNull { i -> ensureActive(); match(i).takeIf { it > 0 }?.let { i to it } }
                 .sortedByDescending { it.second }.map { it.first }
+            Platform.log("поиск «$q»: ${items.size} из ${all.size}, ${Platform.nowMs() - t0} мс")
         } else items = when (v.sort) {
             Sort.NUMBER -> items
             Sort.PRIORITY -> items.sortedWith(compareBy<Inventory.Item> { it.priority.toIntOrNull() ?: Int.MAX_VALUE }.thenBy { it.number.toIntOrNull() ?: 0 })

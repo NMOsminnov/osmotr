@@ -64,6 +64,10 @@ object Store {
     fun isPhoto(f: File) = f.isFile && !f.name.startsWith(".") && f.length() > 0 &&
         f.extension.lowercase() in PHOTO_EXT
 
+    /** То же по имени и уже прочитанным сведениям — без лишних обращений к диску. */
+    fun isPhoto(name: String, m: okio.FileMetadata) = m.isRegularFile && !name.startsWith(".") && (m.size ?: 0) > 0 &&
+        name.substringAfterLast('.', "").lowercase() in PHOTO_EXT
+
     private val PHOTO_EXT = setOf("jpg", "jpeg", "heic", "heif")
 
     /** Снимки папки — новые первыми, как в галерее: вернулся с камеры — снятое сразу на виду. */

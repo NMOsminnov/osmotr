@@ -163,6 +163,14 @@ class TemplatesTest {
         assertEquals("чужое слово — не найдено", 0, Search.scoreItem(printer, "принтер холодильник"))
         assertEquals("короткое — без опечаток", 0, Search.scoreItem(printer, "кот"))
         assertTrue("точное выше опечатки", Search.scoreItem(printer, "принтер") > Search.scoreItem(printer, "принер"))
+        // Набрали хвост с бирки «2545» — инвентарник 013/2545 выше строки № 2545 (найдено на описи в 5,7 тыс. строк).
+        val bed = Inventory.Item("Опись", "2545", "013/627", "Кровать", null, null, "", "", 2545)
+        val laptop = Inventory.Item("Опись", "12", "013/2545", "Ноутбук ASER", null, null, "", "", 12)
+        assertTrue("хвост инвентарника выше № строки", Search.scoreItem(laptop, "2545") > Search.scoreItem(bed, "2545"))
+        assertTrue("№ строки тоже находится", Search.scoreItem(bed, "2545") > 0)
+        assertTrue("латиница в названии — набрано кириллицей", Search.scoreItem(laptop, "ноутбук асер") > 0)
+        assertTrue("и с опечаткой", Search.scoreItem(laptop, "ноутбк асер") > 0)
+        assertTrue("и наоборот", Search.scoreItem(Inventory.Item("Опись", "1", "1", "Монитор Делл", null, null, "", "", 1), "dell") > 0)
     }
 
     @Test fun заголовки_с_опечатками() {

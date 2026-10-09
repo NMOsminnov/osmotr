@@ -9,9 +9,27 @@ object Search {
      */
     fun compact(s: String) = norm(s).filter { it.isLetterOrDigit() }.map { LOOKALIKE[it] ?: it }.joinToString("")
 
+    /**
+     * Слово для сравнения в поиске: латиница — кириллицей (похожие по виду и прочие по звучанию):
+     * в описи «Ноутбук ASER», набирают «асер»; «Dell» — «делл». Инвентарники так не сводятся —
+     * у них только похожие по виду ([compact]).
+     */
+    fun fold(w: String) = w.map { LOOKALIKE[it] ?: SOUND[it] ?: it }.joinToString("")
+    private val SOUND = mapOf('s' to 'с', 'r' to 'р', 'd' to 'д', 'f' to 'ф', 'g' to 'г', 'i' to 'и', 'l' to 'л',
+        'n' to 'н', 'u' to 'у', 'v' to 'в', 'z' to 'з')
+
     private val LOOKALIKE = mapOf('a' to 'а', 'b' to 'в', 'c' to 'с', 'e' to 'е', 'h' to 'н', 'k' to 'к', 'm' to 'м',
         'o' to 'о', 'p' to 'р', 't' to 'т', 'x' to 'х', 'y' to 'у')
-    fun words(s: String) = norm(s).split(Regex("""[^\p{L}\p{N}]+""")).filter { it.isNotEmpty() }
+    /** Слова — буквы и цифры подряд; без регулярного выражения: на 5,7 тыс. строк оно стоило секунды на телефоне. */
+    fun words(s: String): List<String> {
+        val n = norm(s); val out = ArrayList<String>(); var start = -1
+        for (i in n.indices) {
+            if (n[i].isLetterOrDigit()) { if (start < 0) start = i }
+            else if (start >= 0) { out += n.substring(start, i); start = -1 }
+        }
+        if (start >= 0) out += n.substring(start)
+        return out
+    }
     private fun numbers(s: String) = Regex("""\d+""").findAll(s).map { it.value.trimStart('0').ifEmpty { "0" } }.toSet()
 
     /** Сколько опечаток прощать слову запроса: короткое — точно, от 4 букв — одну, от 7 — две. */
@@ -42,6 +60,15 @@ object Search {
     fun fuzzyPrefix(w: String, t: String): Boolean {
         if (w.startsWith(t)) return true
         val k = allowed(t.length); if (k == 0) return false
+        // Номер с бирки набирают точно: «похожие» числа — мусор, а не опечатка.
+        if (t.all { it.isDigit() }) return false
+        if (w.length < t.length - k) return false
+        // Быстрый отсев без расстояния: букв запроса, которых нет в начале слова, больше, чем
+        // прощаем опечаток, — не оно. На 5,7 тыс. строк расстояние считалось для каждого слова
+        // каждой строки: 0,7 с на запрос на телефоне.
+        val head = minOf(w.length, t.length + k)
+        var miss = 0
+        for (ch in t) { val at = w.indexOf(ch); if (at < 0 || at >= head) { if (++miss > k) return false } }
         return (t.length - 1..t.length + 1).any { n -> n in 1..w.length && distance(w.take(n), t, k) <= k }
     }
 
@@ -52,29 +79,54 @@ object Search {
      * порядке, каждое слово запроса — начало какого-то слова, с учётом опечаток; все слова
      * запроса должны найтись. Точные совпадения выше опечаток.
      */
-    fun scoreItem(i: Inventory.Item, query: String): Int {
-        val q = query.trim(); if (q.isEmpty()) return 0
-        val c = compact(q); if (c.isEmpty()) return 0
-        val inv = compact(i.inventory)
-        if (inv.isNotEmpty()) when {
-            inv == c || i.number == q -> return 10000
-            inv.startsWith(c) -> return 9000
-            c.length >= 3 && inv.contains(c) -> return 8000
-        }
-        val tokens = words(q); if (tokens.isEmpty()) return 0
-        val ws = words(i.name + " " + i.place) + words(i.inventory)
-        var total = 0
-        for (t in tokens) {
-            total += when {
-                ws.any { it == t } -> 30
-                ws.any { it.startsWith(t) } -> 20
-                compact(i.inventory).contains(compact(t)) && compact(t).length >= 2 -> 20
-                ws.any { fuzzyPrefix(it, t) } -> 8
-                else -> return 0
+    fun scoreItem(i: Inventory.Item, query: String): Int = matcher(query)(i)
+
+    /**
+     * Запрос, приготовленный один раз на весь поиск: чистка и разбор на слова (регулярным
+     * выражением) делались для каждой строки описи заново — на 5,7 тыс. строк 0,7 с на телефоне.
+     */
+    fun matcher(query: String): (Inventory.Item) -> Int {
+        val q = query.trim(); val c = compact(q)
+        if (q.isEmpty() || c.isEmpty()) return { 0 }
+        val tokens = words(q).map(::fold).map { it to compact(it) }
+        return fun(i: Inventory.Item): Int {
+            val (inv, ws) = prepared(i)
+            if (inv.isNotEmpty()) when {
+                inv == c -> return 10000
+                // С бирки набирают хвост («2545» из «013/2545») или начало — выше номера строки.
+                c.length >= 3 && (inv.endsWith(c) || inv.startsWith(c)) -> return 9000
             }
+            if (i.number == q) return 8500  // № по порядку — из распечатки описи
+            if (inv.isNotEmpty() && c.length >= 3 && inv.contains(c)) return 8000
+            if (tokens.isEmpty()) return 0
+            var total = 0
+            for ((t, tc) in tokens) {
+                total += when {
+                    ws.any { it == t } -> 30
+                    ws.any { it.startsWith(t) } -> 20
+                    tc.length >= 2 && inv.contains(tc) -> 20
+                    ws.any { fuzzyPrefix(it, t) } -> 8
+                    else -> return 0
+                }
+            }
+            return total
         }
-        return total
     }
+
+    /**
+     * Предмет, приготовленный к поиску: инвентарник без разделителей и слова названия, места,
+     * инвентарника — один раз на предмет, а не на каждую букву запроса (5,7 тыс. строк резались
+     * на слова заново при каждом нажатии — секунды на телефоне).
+     */
+    private fun prepared(i: Inventory.Item): Pair<String, List<String>> =
+        kotlinx.atomicfu.locks.synchronized(preparedLock) { preparedMemo[i] }
+            ?: (compact(i.inventory) to (words(i.name + " " + i.place) + words(i.inventory)).map(::fold)).also { p ->
+                kotlinx.atomicfu.locks.synchronized(preparedLock) { if (preparedMemo.size > 200_000) preparedMemo.clear(); preparedMemo[i] = p }
+            }
+    private val preparedMemo = HashMap<Inventory.Item, Pair<String, List<String>>>()
+    /** Приготовить заранее (при открытии описи, в фоне): первая буква запроса не ждёт 5,7 тыс. строк. */
+    fun prepare(items: List<Inventory.Item>) { items.forEach { prepared(it) } }
+    private val preparedLock = kotlinx.atomicfu.locks.SynchronizedObject()
 
     data class Entry(val dir: File, val name: String, val where: String, val note: String?, val photos: Int, val depth: Int)
     data class Hit(val entry: Entry, val score: Int, val noteLine: String?)
@@ -141,8 +193,9 @@ object Search {
         .filter { it.isDirectory }.flatMap { d -> Inventory.filesIn(d).asSequence().flatMap { f -> Inventory.parse(f).items.asSequence().map { ItemEntry(d, it) } } }
         .toList()
 
-    fun findItems(all: List<ItemEntry>, query: String, limit: Int = 50): List<ItemEntry> =
-        all.mapNotNull { e -> scoreItem(e.item, query).takeIf { it > 0 }?.let { e to it } }
+    /** [alive] — не бросили ли поиск (набрали следующую букву): тогда прерваться, не досчитывая. */
+    fun findItems(all: List<ItemEntry>, query: String, limit: Int = 50, alive: () -> Boolean = { true }): List<ItemEntry> =
+        matcher(query).let { match -> all.mapNotNull { e -> if (!alive()) return emptyList(); match(e.item).takeIf { it > 0 }?.let { e to it } } }
             .sortedWith(compareByDescending<Pair<ItemEntry, Int>> { it.second }.thenBy { it.first.item.priority.toIntOrNull() ?: 99 })
             .take(limit).map { it.first }
 }

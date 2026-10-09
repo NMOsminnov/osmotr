@@ -585,14 +585,23 @@ object Inventory {
     private fun cacheFile(f: File) = File(Store.cacheDir, "inventory/" + ("v4|" + f.absolutePath + "|" + f.length() + "|" + f.lastModified()).hashCode() + ".json")
     private fun cached(f: File, cache: File): Parsed? = runCatching { if (cache.isFile) Parsed(f, json.decodeFromString<Cached>(cache.readText()).items) else null }.getOrNull()
 
-    /** Разобрать (или взять из кэша); один файл — один разбор, второй ждёт готовое. */
+    /**
+     * Разобрать (или взять готовое); один файл — один разбор, второй ждёт готовое. Разобранное
+     * держится в памяти, пока файл тот же (размер и время): с диска кэш читался на каждый снимок
+     * и каждую отметку — 70 мс на 5,7 тыс. строк на компьютере, на телефоне в разы дольше.
+     */
     fun parse(f: File): Parsed {
+        val stamp = f.length() to f.lastModified()
+        kotlinx.atomicfu.locks.synchronized(memoLock) { memo[f.absolutePath]?.takeIf { it.first == stamp }?.let { return it.second } }
         val cache = cacheFile(f)
-        cached(f, cache)?.let { return it }
-        return kotlinx.atomicfu.locks.synchronized(lockOf(f.absolutePath)) {
+        val p = cached(f, cache) ?: kotlinx.atomicfu.locks.synchronized(lockOf(f.absolutePath)) {
             cached(f, cache) ?: try { parseFresh(f, cache) } finally { told(f) }
         }
+        kotlinx.atomicfu.locks.synchronized(memoLock) { memo[f.absolutePath] = stamp to p }
+        return p
     }
+    private val memo = HashMap<String, Pair<Pair<Long, Long>, Parsed>>()
+    private val memoLock = kotlinx.atomicfu.locks.SynchronizedObject()
 
     private fun parseFresh(f: File, cache: File): Parsed {
         tell(f, 0f, "Открываем файл")
@@ -657,15 +666,20 @@ object Inventory {
     fun status(obj: File): Status {
         val folder = HashMap<String, File>()
         val photos = HashMap<File, Int>(); val first = HashMap<File, Long>(); val last = HashMap<File, Long>()
-        obj.walkTopDown().onEnter { it == obj || !it.name.startsWith(".") }.filter { it.isDirectory && it != obj }.forEach { d ->
-            val m = members(d)
-            // Без файла — по имени: папку назвали инвентарником вручную.
-            (m.ifEmpty { listOf(invOfName(d.name)) }).forEach { inv -> folder.getOrPut(key(inv)) { d } }
-            var n = 0; var lo = Long.MAX_VALUE; var hi = 0L
-            d.walkTopDown().filter(Store::isPhoto).forEach { f -> n++; val t = f.lastModified(); if (t < lo) lo = t; if (t > hi) hi = t }
-            photos[d] = n
-            if (n > 0) { first[d] = lo; last[d] = hi }
+        // Снимки папки — со вложенными: сначала вглубь, потом сама папка.
+        fun visit(d: File): Triple<Int, Long, Long> {
+            val f = Folders.facts(d)
+            if (d != obj) (f.members.ifEmpty { listOf(invOfName(d.name)) }).forEach { inv -> folder.getOrPut(key(inv)) { d } }
+            var n = f.photos; var lo = if (f.photos > 0) f.first else Long.MAX_VALUE; var hi = f.last
+            for (sub in f.subdirs) {
+                val (cn, clo, chi) = visit(File(d, sub))
+                n += cn; if (cn > 0) { lo = minOf(lo, clo); hi = maxOf(hi, chi) }
+            }
+            if (d != obj) { photos[d] = n; if (n > 0) { first[d] = lo; last[d] = hi } }
+            return Triple(n, lo, hi)
         }
+        visit(obj)
+        Folders.saveSoon()
         return Status(folder, photos, first, last, brokenOf(obj))
     }
 
@@ -886,17 +900,48 @@ object Inventory {
     fun refreshReportSoon(dir: File) {
         val obj = objectOf(dir) ?: return
         val k = obj.path
-        val first = kotlinx.atomicfu.locks.synchronized(reportsLock) { if (k in reports) { reports[k] = true; false } else { reports[k] = false; true } }
+        // Флаг «пересобрать» и метка «отчёт устарел» на диске — под одним замком с её снятием:
+        // свернули и закрыли раньше сборки — отчёт соберётся при следующем запуске.
+        val first = kotlinx.atomicfu.locks.synchronized(reportsLock) {
+            markStale(obj)
+            if (k in reports) { reports[k] = true; false } else { reports[k] = false; true }
+        }
         if (!first) return
         reportScope.launch {
             do {
-                runCatching { writeReport(obj) }
+                // Серия снимков — одна пересборка: ждём, пока правки утихнут.
+                kotlinx.coroutines.delay(REPORT_QUIET_MS)
+                kotlinx.atomicfu.locks.synchronized(reportsLock) { reports[k] = false }
+                val ok = runCatching { writeReport(obj) }.isSuccess
                 val again = kotlinx.atomicfu.locks.synchronized(reportsLock) {
-                    if (reports[k] == true) { reports[k] = false; true } else { reports.remove(k); false }
+                    if (reports[k] == true) true
+                    else { if (ok) staleMark(obj).delete(); reports.remove(k); false }
                 }
             } while (again)
         }
     }
+    private fun markStale(obj: File) = runCatching {
+        val m = staleMark(obj)
+        if (!m.isFile) { m.parentFile?.mkdirs(); Store.writeDurably(m, obj.path.encodeToByteArray()) }
+    }
+    /** Отчёты, не собранные до закрытия приложения, — собрать (при запуске). */
+    fun resumeReports() {
+        File(Store.cacheDir, "stale-reports").listFiles()?.forEach { m ->
+            val obj = runCatching { File(m.readText().trim()) }.getOrNull()
+            if (obj != null && obj.isDirectory) refreshReportSoon(obj) else m.delete()
+        }
+    }
+    /** То же, но сразу и здесь же (тесты; без ожидания фона). */
+    fun resumeReportsNow() {
+        File(Store.cacheDir, "stale-reports").listFiles()?.forEach { m ->
+            val obj = runCatching { File(m.readText().trim()) }.getOrNull()
+            if (obj != null && obj.isDirectory && runCatching { writeReport(obj) }.isSuccess) m.delete() else if (obj?.isDirectory != true) m.delete()
+        }
+    }
+    private fun staleMark(obj: File) = File(Store.cacheDir, "stale-reports/" + obj.path.hashCode().toUInt() + ".txt")
+    /** Сколько ждать тишины после правки, прежде чем собирать отчёт. */
+    var REPORT_QUIET_MS = 1500L
+
     /** Объект → «просили ещё раз, пока собирали». */
     private val reports = HashMap<String, Boolean>()
     private val reportsLock = kotlinx.atomicfu.locks.SynchronizedObject()

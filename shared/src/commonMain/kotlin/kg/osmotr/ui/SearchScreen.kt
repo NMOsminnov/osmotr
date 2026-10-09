@@ -57,6 +57,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
 
 /** Поиск папок: поле с клавиатурой сразу, результаты по мере набора; касание — в папку. */
@@ -64,9 +65,11 @@ import kotlinx.coroutines.withContext
 fun SearchScreen(here: File, initial: String = "", open: (File) -> Unit, close: () -> Unit) {
     var query by rememberSaveable { mutableStateOf(initial) }
     val index by produceState<List<Search.Entry>?>(null) { value = withContext(Dispatchers.IO) { Search.index() } }
-    val itemIndex by produceState<List<Search.ItemEntry>>(emptyList()) { value = withContext(Dispatchers.IO) { runCatching { Search.items() }.getOrDefault(emptyList()) } }
+    val itemIndex by produceState<List<Search.ItemEntry>>(emptyList()) {
+        value = withContext(Dispatchers.IO) { runCatching { Search.items() }.getOrDefault(emptyList()).also { all -> Search.prepare(all.map { it.item }) } }
+    }
     val itemHits by produceState(emptyList<Search.ItemEntry>(), itemIndex, query) {
-        value = withContext(Dispatchers.Default) { Search.findItems(itemIndex, query) }
+        value = withContext(Dispatchers.Default) { Search.findItems(itemIndex, query) { isActive } }
     }
     val scope = androidx.compose.runtime.rememberCoroutineScope()
     val hits by produceState(emptyList<Search.Hit>(), index, query) {
