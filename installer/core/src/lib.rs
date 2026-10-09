@@ -27,6 +27,9 @@ pub enum StepId {
     Phone,
     /// «Доверять этому компьютеру» на iPhone.
     Trust,
+    /// «Режим разработчика» на iPhone — сразу после знакомства: перезагрузка телефона в начале,
+    /// пока человек внимателен, и Apple ID для этого не нужен.
+    DevMode,
     /// Вход в Apple ID (подпись — им).
     AppleId,
     /// SideStore — продлевает подпись сам, раз в неделю.
@@ -35,15 +38,13 @@ pub enum StepId {
     Osmotr,
     /// LocalDevVPN — без него SideStore не продлевает.
     Vpn,
-    /// «Режим разработчика» на iPhone.
-    DevMode,
     /// «Доверять разработчику».
     Signer,
 }
 
 impl StepId {
-    pub const ALL: [StepId; 9] = [StepId::Drivers, StepId::Phone, StepId::Trust, StepId::AppleId, StepId::SideStore,
-        StepId::Osmotr, StepId::Vpn, StepId::DevMode, StepId::Signer];
+    pub const ALL: [StepId; 9] = [StepId::Drivers, StepId::Phone, StepId::Trust, StepId::DevMode, StepId::AppleId,
+        StepId::SideStore, StepId::Osmotr, StepId::Vpn, StepId::Signer];
 
     /// Подпись шага в окне.
     pub fn title(self) -> &'static str {

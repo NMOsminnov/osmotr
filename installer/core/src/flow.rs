@@ -128,7 +128,15 @@ async fn steps(ctx: &Ctx) -> R<Vec<String>> {
     let phone = phone::describe(device).await?;
     ctx.step(StepId::Trust, StepState::Done, format!("{} · iOS {}", phone.name, phone.version));
 
-    // 4. Apple ID.
+    // 4. Режим разработчика — до Apple ID: перезагрузка в начале, и без входа можно проверить.
+    ctx.step(StepId::DevMode, StepState::Running, "Проверяем");
+    if !phone::dev_mode_on(&phone).await.unwrap_or(false) {
+        dev_mode(ctx, &phone).await?;
+    }
+    ctx.hint_done();
+    ctx.step(StepId::DevMode, StepState::Done, "");
+
+    // 5. Apple ID.
     ctx.step(StepId::AppleId, StepState::Running, "Введите Apple ID");
     let store = ctx.work.join("account");
     let mut error = None;
@@ -144,7 +152,7 @@ async fn steps(ctx: &Ctx) -> R<Vec<String>> {
     };
     ctx.step(StepId::AppleId, StepState::Done, email.clone());
 
-    // 5. SideStore + файл пары.
+    // 6. SideStore + файл пары.
     ctx.step(StepId::SideStore, StepState::Running, "Скачиваем");
     let ss_ipa = ctx.work.join("SideStore.ipa");
     apps::download(apps::SIDESTORE_URL, &ss_ipa, |g, t| ctx.step(StepId::SideStore, StepState::Running, format!("Скачиваем — {}", apps::of(g, t)))).await?;
@@ -160,13 +168,13 @@ async fn steps(ctx: &Ctx) -> R<Vec<String>> {
         None => return Err(Failure::new("SideStore не появился на телефоне", "нет в списке приложений")),
     }
 
-    // 6. «Осмотр».
+    // 7. «Осмотр».
     ctx.step(StepId::Osmotr, StepState::Running, "Подписываем и ставим");
     if !ctx.osmotr_ipa.exists() { return Err(Failure::new("Рядом с установщиком нет «Осмотра»", ctx.osmotr_ipa.display())) }
     apps::sign_and_install(&mut signer, &phone, &ctx.osmotr_ipa, |p| ctx.step(StepId::Osmotr, StepState::Running, format!("Ставим — {} %", (p * 100.0) as i32))).await?;
     ctx.step(StepId::Osmotr, StepState::Done, "");
 
-    // 7. LocalDevVPN из App Store — тем же Apple ID. Не вышло — человек поставит сам.
+    // 8. LocalDevVPN из App Store — тем же Apple ID. Не вышло — человек поставит сам.
     ctx.step(StepId::Vpn, StepState::Running, "Проверяем");
     if apps::has_app(&phone, "LocalDevVPN").await.unwrap_or(false) {
         ctx.step(StepId::Vpn, StepState::Done, "Уже стоит");
@@ -180,14 +188,6 @@ async fn steps(ctx: &Ctx) -> R<Vec<String>> {
         }
     }
     left.push("Откройте LocalDevVPN, нажмите «Подключить» и разрешите добавить VPN (введите код телефона).".into());
-
-    // 8. Режим разработчика.
-    ctx.step(StepId::DevMode, StepState::Running, "Проверяем");
-    if !phone::dev_mode_on(&phone).await.unwrap_or(false) {
-        dev_mode(ctx, &phone).await?;
-    }
-    ctx.hint_done();
-    ctx.step(StepId::DevMode, StepState::Done, "");
 
     // 9. Доверие разработчику — без настроек, если телефон даст; иначе — подсказка в конце.
     ctx.step(StepId::Signer, StepState::Running, "Проверяем");
