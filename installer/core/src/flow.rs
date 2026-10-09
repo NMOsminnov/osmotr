@@ -130,8 +130,9 @@ async fn steps(ctx: &Ctx) -> R<Vec<String>> {
 
     // 4. Режим разработчика — до Apple ID: перезагрузка в начале, и без входа можно проверить.
     ctx.step(StepId::DevMode, StepState::Running, "Проверяем");
+    let mut phone = phone;
     if !phone::dev_mode_on(&phone).await.unwrap_or(false) {
-        dev_mode(ctx, &phone).await?;
+        dev_mode(ctx, &mut phone).await?;
     }
     ctx.hint_done();
     ctx.step(StepId::DevMode, StepState::Done, "");
@@ -235,7 +236,7 @@ async fn vpn(ctx: &Ctx, phone: &Phone, email: &str, password: &str) -> R<()> {
 
 /// Режим разработчика: без кода-пароля телефон включит сам; с кодом — показываем пункт в
 /// настройках и ведём; после перезагрузки — окно подтверждения; ждём, пока станет включён.
-async fn dev_mode(ctx: &Ctx, phone: &Phone) -> R<()> {
+async fn dev_mode(ctx: &Ctx, phone: &mut Phone) -> R<()> {
     if phone::enable_dev_mode(phone).await.is_err() {
         let _ = phone::reveal_dev_mode(phone).await;
         ctx.hint("Включите «Режим разработчика»",
@@ -254,12 +255,15 @@ async fn dev_mode(ctx: &Ctx, phone: &Phone) -> R<()> {
         match phone::dev_mode_on(phone).await {
             Ok(true) => return Ok(()),
             Ok(false) => {}
-            // Пропал с кабеля — перезагружается; вернулся — показать подтверждение.
+            // Пропал с кабеля — перезагружается; вернулся (с новым номером подключения) —
+            // показать подтверждение. Сам телефон находится заново, кабель трогать не нужно.
             Err(_) => {
                 ctx.step(StepId::DevMode, StepState::Running, "iPhone перезагружается");
-                if phone::wait_back(&phone.udid, Duration::from_secs(300)).await && !asked_accept {
+                let Some(back) = phone::wait_back(&phone.udid, Duration::from_secs(300)).await else { continue };
+                *phone = back;
+                // До первой разблокировки телефон может не ответить — спросим ещё раз на следующем круге.
+                if !asked_accept && phone::accept_dev_mode(phone).await.is_ok() {
                     asked_accept = true;
-                    let _ = phone::accept_dev_mode(phone).await;
                     ctx.hint("Нажмите «Включить»", "На iPhone появится вопрос о режиме разработчика — нажмите «Включить» и введите код телефона.", Some("devmode"));
                 }
             }

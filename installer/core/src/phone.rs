@@ -226,11 +226,13 @@ fn profile_uuid(der: &[u8]) -> Option<String> {
 }
 
 /// Подождать: телефон пропал с кабеля (перезагрузка) и вернулся.
-pub async fn wait_back(udid: &str, limit: Duration) -> bool {
+/// Служба Apple даёт вернувшемуся телефону новый номер подключения — старый [Phone] после
+/// перезагрузки или переподключения кабеля уже не достучится; работать дальше — с возвращённым.
+pub async fn wait_back(udid: &str, limit: Duration) -> Option<Phone> {
     let start = std::time::Instant::now();
     while start.elapsed() < limit {
-        if let Ok(Some(d)) = find_usb().await && d.udid == udid && describe(d).await.is_ok() { return true; }
+        if let Ok(Some(d)) = find_usb().await && d.udid == udid && let Ok(p) = describe(d).await { return Some(p); }
         tokio::time::sleep(Duration::from_secs(2)).await;
     }
-    false
+    None
 }
