@@ -23,4 +23,18 @@ expect object Platform {
     fun makeThumb(photo: String, out: String, px: Int): Boolean
     /** Строка в системный журнал (Android — logcat, iPhone — консоль): для разбора медленного и ошибок. */
     fun log(msg: String)
+
+    // Журнал описи (защита отчёта от подмены): отпечатки и подпись ключом телефона.
+    /** SHA-256. */
+    fun sha256(bytes: ByteArray): ByteArray
+    /** SHA-256 файла — потоком, без чтения снимка в память целиком. */
+    fun sha256File(path: String): ByteArray
+    /** Открытый ключ телефона — точка P-256 без сжатия (65 байт, 04‖x‖y); ключ создаётся при первом обращении. */
+    fun publicKey(): ByteArray
+    /** Подпись ECDSA P-256 / SHA-256 закрытым ключом телефона (DER). Закрытый ключ телефон не покидает. */
+    fun sign(data: ByteArray): ByteArray
+    /** Проверить подпись [signature] данных [data] открытым ключом [publicKey] (65 байт). */
+    fun verify(publicKey: ByteArray, data: ByteArray, signature: ByteArray): Boolean
+    /** Модель телефона — «кто» в журнале, если человек не назвался. */
+    fun deviceName(): String
 }

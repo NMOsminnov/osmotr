@@ -68,7 +68,7 @@ fun VoiceRecorderDialog(dir: File, onClose: () -> Unit) {
     fun stop() {
         val f = file ?: return
         file = null
-        if (host.stopRecording()) { Store.scan(listOf(f)); Store.changed(); host.toast("Записано: ${clock(now - started)}") }
+        if (host.stopRecording()) { Store.voiceSaved(f); host.toast("Записано: ${clock(now - started)}") }
         // Запись уже закрыта (свернули приложение — сохранилась там) — не трогать; пустую — убрать.
         else if (!Store.isVoice(f)) f.delete()
     }

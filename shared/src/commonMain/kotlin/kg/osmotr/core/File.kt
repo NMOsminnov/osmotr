@@ -47,6 +47,10 @@ class File(val path: String) : Comparable<File> {
     fun writeBytes(bytes: ByteArray) { fs.write(p) { write(bytes) } }
     fun writeText(text: String) { fs.write(p) { writeUtf8(text) } }
     fun sink(body: (BufferedSink) -> Unit) { fs.sink(p).buffer().use(body) }
+    /** Дописать в конец и сбросить на диск (fsync): журнал растёт строкой, а не перезаписью всего файла. */
+    fun appendDurably(bytes: ByteArray) {
+        fs.openReadWrite(p).use { h -> h.write(h.size(), bytes, 0, bytes.size); h.flush() }
+    }
 
     /** Обход вглубь (папка, потом её содержимое); [onEnter] — заходить ли в папку. */
     fun walkTopDown(): Walk = Walk(this, { true })

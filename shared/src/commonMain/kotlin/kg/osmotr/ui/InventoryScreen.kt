@@ -477,11 +477,12 @@ fun InventoryScreen(obj: File, into: File? = null, initialQuery: String? = null,
 private fun ExportDialog(obj: File, onClose: () -> Unit) {
     val host = LocalHost.current
     val scope = rememberCoroutineScope()
-    data class Counts(val all: Int, val since: Int?, val last: Long?, val today: Int)
+    data class Counts(val all: Int, val since: Int?, val last: Long?, val today: Int, val journal: kg.osmotr.core.Journal.Check)
     val counts by produceState<Counts?>(null) {
         value = withContext(Dispatchers.IO) {
             val last = Inventory.lastExport(obj)
-            Counts(Inventory.photosSince(obj, 0), last?.let { Inventory.photosSince(obj, it) }, last, Inventory.photosSince(obj, Platform.startOfDay()))
+            Counts(Inventory.photosSince(obj, 0), last?.let { Inventory.photosSince(obj, it) }, last, Inventory.photosSince(obj, Platform.startOfDay()),
+                kg.osmotr.core.Journal.verify(obj))  // при выгрузке — проверка всего журнала, а не только новых строк
         }
     }
     var zipping by remember { mutableStateOf<Float?>(null) }
@@ -527,6 +528,9 @@ private fun ExportDialog(obj: File, onClose: () -> Unit) {
                                 if (enabled) Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                         }
+                        // Журнал описи — цел или правили руками: видно до отправки.
+                        if (c.journal.count > 0) Text(c.journal.text(), Modifier.padding(bottom = 6.dp), style = MaterialTheme.typography.bodyMedium,
+                            color = if (c.journal.ok) DONE_GREEN else BROKEN_RED, fontWeight = FontWeight.SemiBold)
                         option("Отчёт Excel", "что осмотрено, что нет — один файл") {
                             scope.launch {
                                 val reports = withContext(Dispatchers.IO) { Inventory.writeReport(obj); Inventory.filesIn(obj).map(Inventory::reportFile).filter { it.isFile } }

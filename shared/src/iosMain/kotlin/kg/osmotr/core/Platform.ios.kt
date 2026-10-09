@@ -1,4 +1,39 @@
+@file:OptIn(kotlinx.cinterop.ExperimentalForeignApi::class, kotlinx.cinterop.BetaInteropApi::class)
+
 package kg.osmotr.core
+
+import kotlinx.cinterop.memScoped
+import platform.CoreCrypto.CC_SHA256
+import platform.CoreCrypto.CC_SHA256_CTX
+import platform.CoreCrypto.CC_SHA256_Init
+import platform.CoreCrypto.CC_SHA256_Update
+import platform.CoreCrypto.CC_SHA256_Final
+import platform.CoreFoundation.CFDataRef
+import platform.CoreFoundation.CFMutableDictionaryRef
+import platform.CoreFoundation.CFDictionaryCreateMutable
+import platform.CoreFoundation.CFDictionaryAddValue
+import platform.CoreFoundation.kCFTypeDictionaryKeyCallBacks
+import platform.CoreFoundation.kCFTypeDictionaryValueCallBacks
+import platform.Foundation.CFBridgingRetain
+import platform.Foundation.CFBridgingRelease
+import platform.Foundation.NSData
+import platform.Foundation.NSNumber
+import platform.Foundation.dataWithBytes
+import platform.Foundation.dataWithContentsOfFile
+import platform.Security.SecKeyRef
+import platform.Security.SecKeyCreateWithData
+import platform.Security.SecKeyCreateRandomKey
+import platform.Security.SecKeyCopyExternalRepresentation
+import platform.Security.SecKeyCopyPublicKey
+import platform.Security.SecKeyCreateSignature
+import platform.Security.SecKeyVerifySignature
+import platform.Security.kSecAttrKeyType
+import platform.Security.kSecAttrKeyTypeECSECPrimeRandom
+import platform.Security.kSecAttrKeyClass
+import platform.Security.kSecAttrKeyClassPrivate
+import platform.Security.kSecAttrKeyClassPublic
+import platform.Security.kSecAttrKeySizeInBits
+import platform.Security.kSecKeyAlgorithmECDSASignatureMessageX962SHA256
 
 import kotlinx.cinterop.ExperimentalForeignApi
 import kotlinx.cinterop.addressOf
@@ -100,4 +135,76 @@ actual object Platform {
     }
     // Текст — целиком, без подстановок: Kotlin-строку в «%@» NSLog не передать (сбой SIGSEGV).
     actual fun log(msg: String) = platform.Foundation.NSLog("osmotr: " + msg.replace("%", "%%"))
+
+    // ---------- Журнал описи: отпечатки и подпись ----------
+    // SHA-256 — CommonCrypto; ключ P-256 — Security: создаётся один раз, закрытая часть — файлом в
+    // служебной папке приложения (не в «Файлах»), подпись — ECDSA X9.62 / SHA-256 (DER, как на Android).
+
+    actual fun sha256(bytes: ByteArray): ByteArray {
+        val out = UByteArray(32)
+        out.usePinned { o -> if (bytes.isEmpty()) CC_SHA256(null, 0u, o.addressOf(0)) else bytes.usePinned { b -> CC_SHA256(b.addressOf(0), bytes.size.toUInt(), o.addressOf(0)) } }
+        return out.asByteArray()
+    }
+
+    actual fun sha256File(path: String): ByteArray = memScoped {
+        val ctx = alloc<CC_SHA256_CTX>()
+        CC_SHA256_Init(ctx.ptr)
+        val f = platform.posix.fopen(path, "rb") ?: return sha256(ByteArray(0))
+        val buf = ByteArray(1 shl 16)
+        buf.usePinned { b ->
+            while (true) {
+                val n = platform.posix.fread(b.addressOf(0), 1u, buf.size.toULong(), f).toInt()
+                if (n <= 0) break
+                CC_SHA256_Update(ctx.ptr, b.addressOf(0), n.toUInt())
+            }
+        }
+        platform.posix.fclose(f)
+        val out = UByteArray(32)
+        out.usePinned { o -> CC_SHA256_Final(o.addressOf(0), ctx.ptr) }
+        out.asByteArray()
+    }
+
+    private fun nsData(b: ByteArray): NSData = if (b.isEmpty()) NSData() else b.usePinned { NSData.dataWithBytes(it.addressOf(0), b.size.toULong()) }
+    private fun bytes(d: NSData): ByteArray {
+        val out = ByteArray(d.length.toInt())
+        if (out.isNotEmpty()) out.usePinned { platform.posix.memcpy(it.addressOf(0), d.bytes, d.length) }
+        return out
+    }
+    @Suppress("UNCHECKED_CAST")
+    private fun cf(d: NSData): CFDataRef = CFBridgingRetain(d) as CFDataRef
+    private fun ns(d: CFDataRef?): NSData? = d?.let { CFBridgingRelease(it) as NSData }
+
+    private fun keyAttrs(private: Boolean, size: Boolean): CFMutableDictionaryRef? {
+        val a = CFDictionaryCreateMutable(null, 0, kCFTypeDictionaryKeyCallBacks.ptr, kCFTypeDictionaryValueCallBacks.ptr)
+        CFDictionaryAddValue(a, kSecAttrKeyType, kSecAttrKeyTypeECSECPrimeRandom)
+        CFDictionaryAddValue(a, kSecAttrKeyClass, if (private) kSecAttrKeyClassPrivate else kSecAttrKeyClassPublic)
+        if (size) CFDictionaryAddValue(a, kSecAttrKeySizeInBits, CFBridgingRetain(NSNumber(int = 256)))
+        return a
+    }
+
+    private val keyFile get() = Store.cacheDir.parentFile!!.path + "/journal.key"
+    private var privateKey: SecKeyRef? = null
+
+    private fun key(): SecKeyRef {
+        privateKey?.let { return it }
+        val saved = NSData.dataWithContentsOfFile(keyFile)
+        val k = if (saved != null) SecKeyCreateWithData(cf(saved), keyAttrs(private = true, size = false), null)
+            else SecKeyCreateRandomKey(keyAttrs(private = true, size = true), null)?.also { k ->
+                ns(SecKeyCopyExternalRepresentation(k, null))?.writeToFile(keyFile, atomically = true)
+            }
+        return k!!.also { privateKey = it }
+    }
+
+    actual fun publicKey(): ByteArray = ns(SecKeyCopyExternalRepresentation(SecKeyCopyPublicKey(key()), null))?.let(::bytes) ?: ByteArray(0)
+
+    actual fun sign(data: ByteArray): ByteArray =
+        ns(SecKeyCreateSignature(key(), kSecKeyAlgorithmECDSASignatureMessageX962SHA256, cf(nsData(data)), null))?.let(::bytes) ?: ByteArray(0)
+
+    actual fun verify(publicKey: ByteArray, data: ByteArray, signature: ByteArray): Boolean {
+        val pub = SecKeyCreateWithData(cf(nsData(publicKey)), keyAttrs(private = false, size = false), null) ?: return false
+        return SecKeyVerifySignature(pub, kSecKeyAlgorithmECDSASignatureMessageX962SHA256, cf(nsData(data)), cf(nsData(signature)), null)
+    }
+
+    actual fun deviceName(): String = platform.UIKit.UIDevice.currentDevice.model
+
 }

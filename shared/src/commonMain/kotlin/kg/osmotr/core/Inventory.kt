@@ -502,7 +502,7 @@ object Inventory {
         val p = parse(fileIn(dir)!!)
         if (p.items.isNotEmpty()) return p
         // Списка нет — вернуть прежнюю опись (или убрать пустую).
-        if (old != null) replace(dir) { it.write(old) } else fileIn(dir)?.delete()
+        if (old != null) replace(dir) { it.write(old) } else fileIn(dir)?.let { Journal.add(dir, "Файл описи", it.name, it, gone = true); it.delete() }
         Store.changed()
         throw IllegalArgumentException(NO_LIST)
     }
@@ -536,6 +536,7 @@ object Inventory {
         cacheFile(f).delete()
         Store.writeDurably(f, write)
         cacheFile(f).delete()
+        Journal.add(dir, "Файл описи", f.name, f)
         Store.scan(listOf(f)); Store.changed()
     }
 
@@ -738,6 +739,7 @@ object Inventory {
         if (on) lines += take.map(::id).distinctBy(::key)
         val f = File(obj, BROKEN)
         if (lines.isEmpty()) f.delete() else Store.writeDurably(f, (lines.joinToString("\n") + "\n").encodeToByteArray())
+        if (take.isNotEmpty()) Journal.add(obj, if (on) "Нерабочее" else "Снова рабочее", take.joinToString(", ") { id(it) }, f, gone = lines.isEmpty())
         Store.changed()
         return take.size
     }
@@ -747,7 +749,11 @@ object Inventory {
     /** Когда опись выгружали в последний раз — скрытым файлом в её папке (для «нового с прошлой»). */
     private fun exportMark(obj: File) = File(obj, ".выгрузка")
     fun lastExport(obj: File): Long? = runCatching { exportMark(obj).readText().trim().toLong() }.getOrNull()
-    fun markExport(obj: File, at: Long = Platform.nowMs()) = runCatching { Store.writeDurably(exportMark(obj), at.toString().encodeToByteArray()) }
+    fun markExport(obj: File, at: Long = Platform.nowMs()) = runCatching {
+        Store.writeDurably(exportMark(obj), at.toString().encodeToByteArray())
+        // Отпечаток отчёта — в подробностях: правку отчёта в Excel видно на сервере (сам отчёт файлы не сверяют — он производный).
+        Journal.add(obj, "Выгрузка", "отчёт " + (fileIn(obj)?.let(::reportFile)?.takeIf { it.isFile }?.let { Journal.hex(Platform.sha256File(it.path)) } ?: "—"))
+    }
 
     /** Сколько снимков в описи новее [since] — для подписей выгрузки. */
     fun photosSince(obj: File, since: Long): Int =
@@ -756,6 +762,7 @@ object Inventory {
     private fun writeMembers(dir: File, invs: List<String>) {
         Store.writeDurably(File(dir, MEMBERS), (invs.distinct().joinToString("\n") + "\n").encodeToByteArray())
         Store.scan(listOf(File(dir, MEMBERS)))
+        Journal.add(dir, "Предметы в папке", Store.relative(dir) + ": " + invs.distinct().joinToString(", "), File(dir, MEMBERS))
     }
 
     /** Папка предмета: есть — её, нет — создать (имя — инвентарник). Сразу к снимкам. */
@@ -787,7 +794,10 @@ object Inventory {
             Store.move(Store.photoTree(other), dir)
             // Свой у прежней папки только этот предмет — она больше не нужна.
             val rest = members(other).filterNot { key(it) == key(id(i)) }
-            if (rest.isEmpty() && Store.photoTree(other).isEmpty() && Store.foldersIn(other).isEmpty()) other.deleteRecursively()
+            if (rest.isEmpty() && Store.photoTree(other).isEmpty() && Store.foldersIn(other).isEmpty()) {
+                Journal.add(other.parentFile!!, Journal.FOLDER_DELETED, Store.relative(other) + ": предмет ушёл в другую папку", other, gone = true)
+                other.deleteRecursively()
+            }
             else writeMembers(other, rest)
         }
         writeMembers(dir, all)
@@ -919,9 +929,21 @@ object Inventory {
             val extra = obj.walkTopDown().onEnter { it == obj || !it.name.startsWith(".") }.filter { it.isDirectory && it != obj }
                 .filter { d -> (members(d).ifEmpty { listOf(invOfName(d.name)) }).none { key(it) in keys } && (d.listFiles()?.any(Store::isPhoto) == true) }
                 .map { d -> listOf<Any?>(d.relativeTo(obj).path, d.listFiles()?.count(Store::isPhoto) ?: 0, Store.note(d)) }.toList()
+            // Журнал: кто и что менял; подпись каждой строки проверена — до первой нарушенной.
+            val log = Journal.entries(obj)
+            val check = Journal.verifyQuick(obj)
+            summary += listOf<Any?>()
+            summary += listOf<Any?>(check.text())
+            val journal = if (log.isEmpty()) emptyList() else listOf(Xlsx.Out("Журнал",
+                listOf(listOf<Any?>("№", "Когда", "Кто", "Что", "Подробно", "Файл", "Отпечаток", "Подпись")) + log.mapIndexed { i, e ->
+                    listOf<Any?>(e.n, WHEN.format(e.t), e.who, e.what, e.subject.take(500), e.file.ifEmpty { null }, e.sha256.take(16).ifEmpty { null },
+                        if (check.brokenAt == null || i + 1 < check.brokenAt) "верна" else "НЕ ВЕРНА")
+                }, listOf(6, 17, 24, 22, 50, 40, 18, 10)) { r -> if (r > 0 && check.brokenAt != null && r >= check.brokenAt) Xlsx.RED else Xlsx.PLAIN }) +
+                (if (check.problems.isEmpty()) emptyList() else listOf(Xlsx.Out("Сверка файлов",
+                    listOf(listOf<Any?>("Файл", "Что не так")) + check.problems.map { listOf<Any?>(it.path, it.kind) }, listOf(70, 24)) { r -> if (r > 0) Xlsx.RED else Xlsx.PLAIN }))
             val book = listOf(Xlsx.Out("Итог", summary, listOf(24, 10, 12, 14, 14, 26, 12))) + sheets +
                 listOf(Xlsx.Out("По дням", days, listOf(14, 24, 22))) +
-                (if (extra.isEmpty()) emptyList() else listOf(Xlsx.Out("Нет в описи", listOf(listOf<Any?>("Папка", "Снимков", "Комментарий")) + extra, listOf(40, 10, 50))))
+                (if (extra.isEmpty()) emptyList() else listOf(Xlsx.Out("Нет в описи", listOf(listOf<Any?>("Папка", "Снимков", "Комментарий")) + extra, listOf(40, 10, 50)))) + journal
             Xlsx.writeBook(reportFile(f), book)
             Store.scan(listOf(reportFile(f)))
         }

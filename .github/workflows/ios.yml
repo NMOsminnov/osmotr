@@ -103,6 +103,10 @@ jobs:
           shot 10-папка-описи 8 -screen folder -path "Склад"
           shot 11-папка-с-папками 8 -screen folder -path "Насосная"
           shot 12-главный-снова 12
+          # Журнал описи на iPhone: ключ, подпись, проверка, подмена — самопроверка приложения.
+          xcrun simctl launch --terminate-running-process --console-pty "$DEVICE" kg.osmotr.app -selftest > shots/selftest.out 2>&1 & sleep 10; kill $! 2>/dev/null || true
+          xcrun simctl spawn "$DEVICE" log show --last 1m --predicate 'process == "Osmotr"' --style compact | grep -o "osmotr: журнал: .*" | tail -1 | tee shots/selftest.txt
+          grep -q "журнал: ok" shots/selftest.txt || echo "::error::самопроверка журнала: $(cat shots/selftest.txt)"
           # Отчёты о сбоях iOS — в результаты.
           find ~/Library/Logs/DiagnosticReports -name "Osmotr*" -newer xcodebuild-sim.log -exec cp {} shots/ \; 2>/dev/null || true
           ls shots/*.ips 2>/dev/null && head -c 3000 shots/*.ips | head -60 || echo "отчётов о сбоях нет"

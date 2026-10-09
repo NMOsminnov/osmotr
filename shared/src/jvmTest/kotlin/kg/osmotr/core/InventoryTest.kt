@@ -106,7 +106,8 @@ class InventoryTest {
         ))
         return obj
     }
-    private fun photo(dir: File, name: String) = File(dir, name).apply { writeBytes(ByteArray(10) { 1 }) }
+    /** Снимок — как кладёт приложение: файл и запись в журнал описи (иначе сверка видит «появился без записи»). */
+    private fun photo(dir: File, name: String) = File(dir, name).apply { writeBytes(ByteArray(10) { 1 }) }.also { Journal.add(dir, "Снимок", Store.relative(it), it) }
 
     @Test fun папка_предмета_называется_инвентарником_и_отмечается_по_снимкам() {
         val obj = objectWithInventory()
@@ -153,7 +154,7 @@ class InventoryTest {
         val report = Inventory.reportFile(Inventory.filesIn(obj).single())
         assertTrue(report.isFile)
         val sheets = Xlsx.sheets(report.readBytes())
-        assertEquals(listOf("Итог", "Опись", "Вынесено", "По дням"), sheets.map { it.name })
+        assertEquals(listOf("Итог", "Опись", "Вынесено", "По дням", "Журнал"), sheets.map { it.name })
         val summary = sheets[0].rows
         assertEquals(listOf("Опись", "4", "1", "3"), summary[1].take(4))
         // По приоритетам: П1 — три юнита, ни один не осмотрен; П4 — машина; П5 — сканер, осмотрен.
@@ -240,7 +241,7 @@ class InventoryTest {
         val extra = Store.createFolder(obj, "Принтер без бирки")!!; photo(extra, "b.jpg")
         Inventory.writeReport(obj)
         val book = Xlsx.sheets(Inventory.reportFile(Inventory.fileIn(obj)!!).readBytes())
-        assertEquals(listOf("Итог", "Опись", "Вынесено", "По дням", "Нет в описи"), book.map { it.name })
+        assertEquals(listOf("Итог", "Опись", "Вынесено", "По дням", "Нет в описи", "Журнал"), book.map { it.name })
         val list = book.first { it.name == "Опись" }.rows
         val head = list[0]; val row = list.first { it.getOrNull(1) == "М-205" }
         assertEquals("треснут корпус", row[head.indexOf("Комментарий")])

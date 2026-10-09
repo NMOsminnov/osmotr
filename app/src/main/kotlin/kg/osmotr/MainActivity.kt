@@ -206,7 +206,7 @@ class MainActivity : ComponentActivity(), Host {
     override fun onStop() {
         super.onStop()
         // Свернули во время записи — записанное сохранить, а не потерять.
-        if (recorder != null) { val f = recordingTo; if (stopRecording() && f != null) { Store.scan(listOf(f)); Store.changed() } }
+        if (recorder != null) { val f = recordingTo; if (stopRecording() && f != null) Store.voiceSaved(f) }
         stopPlaying()
     }
 }

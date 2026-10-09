@@ -112,6 +112,7 @@ object Store {
         if (clean.isEmpty()) return null
         val dir = File(parent, clean)
         if (dir.exists() || !dir.mkdirs()) return null
+        Journal.add(dir, "Папка создана", relative(dir))
         changed()
         return dir
     }
@@ -122,9 +123,11 @@ object Store {
         val to = File(dir.parentFile, clean)
         if (to.exists()) return null
         val before = photoTree(dir)
+        val from = relative(dir)
         if (!dir.renameTo(to)) return null
         thumbDir(dir).let { if (it.exists()) it.renameTo(thumbDir(to)) }
         scan(before + photoTree(to))
+        Journal.add(to, "Папка переименована", "$from → ${relative(to)}")
         changed()
         return to
     }
@@ -139,9 +142,17 @@ object Store {
         var n = 2
         while (target.exists()) target = File(to, "${dir.name} (${n++})")
         val before = photoTree(dir)
+        val from = relative(dir); val oldParent = dir.parentFile!!
         if (!dir.renameTo(target)) return null
         thumbDir(dir).let { if (it.exists()) { thumbDir(target).parentFile?.mkdirs(); it.renameTo(thumbDir(target)) } }
         scan(before + photoTree(target))
+        val what = "$from → ${relative(target)}"
+        if (Inventory.objectOf(oldParent) == Inventory.objectOf(target)) Journal.add(target, Journal.FOLDER_MOVED, what)
+        else {
+            // Из одной описи в другую: в старой — ушло, в новой — пришло, каждый файл с отпечатком.
+            Journal.add(oldParent, Journal.FOLDER_DELETED, what, File(oldParent, dir.name), gone = true)
+            Journal.tracked(target).forEach { Journal.add(it.parentFile!!, "Перенесено из другой описи", what, it) }
+        }
         changed()
         return target
     }
@@ -156,6 +167,13 @@ object Store {
 
     /** Голосовые заметки папки — новые первыми. */
     fun voiceNotes(dir: File): List<File> = dir.listFiles()?.filter(::isVoice)?.sortedByDescending { it.name }.orEmpty()
+
+    /** Голосовая заметка записана: видна системе, в журнал описи — с отпечатком. */
+    fun voiceSaved(f: File) {
+        scan(listOf(f))
+        f.parentFile?.let { Journal.add(it, "Голосовая заметка", relative(f), f) }
+        changed()
+    }
 
     /** Файл для новой заметки: «<папка>_голос_ГГГГММДД_ЧЧММСС.m4a». */
     fun newVoiceFile(dir: File): File =
@@ -172,6 +190,7 @@ object Store {
         val f = File(dir, NOTE)
         if (text.isBlank()) f.delete() else writeDurably(f, (text.trim() + "\n").encodeToByteArray())
         scan(listOf(f))
+        Journal.add(dir, "Комментарий", relative(dir) + ": " + text.trim().ifEmpty { "удалён" }.take(300), f, gone = text.isBlank())
         changed()
     }
 
@@ -223,6 +242,8 @@ object Store {
         val rows = list.filterNot { it.blank }
         if (rows.isEmpty()) f.delete() else Xlsx.write(f, listOf(CONTACT_COLUMNS) + rows.map { it.cells() })
         scan(listOf(f))
+        Journal.add(dir, "Контакты", relative(dir) + ": " + rows.joinToString("; ") { listOf(it.name, it.phone).filter(String::isNotBlank).joinToString(" ") }.take(300),
+            f, gone = rows.isEmpty())
         changed()
     }
 
@@ -251,6 +272,8 @@ object Store {
             if (f.isDirectory || dst.isDirectory) { folders++; thumbDir(f).deleteRecursively() } else thumbFile(f).delete()
             photos += inside.size
             gone += inside
+            Journal.add(f.parentFile!!, when { dst.isDirectory -> Journal.FOLDER_DELETED; isVoice(dst) -> "Голосовая заметка удалена"; else -> "Снимок удалён" },
+                relative(f), f, gone = true)
             f to dst
         }
         if (moved.isEmpty()) { bin.deleteRecursively(); return null }
@@ -265,7 +288,11 @@ object Store {
             var to = orig
             var n = 2
             while (to.exists()) to = File(orig.parentFile, orig.nameWithoutExtension + " (${n++})" + (if (orig.extension.isEmpty()) "" else "." + orig.extension))
-            if (dst.renameTo(to)) to else null
+            if (dst.renameTo(to)) to.also { back ->
+                // Папка вернулась — каждый её файл заново в журнал (с отпечатком), снимок — сам.
+                val files = if (back.isDirectory) Journal.tracked(back) else listOf(back)
+                files.forEach { Journal.add(it.parentFile!!, "Возвращено из корзины", relative(it), it) }
+            } else null
         }
         scan(back.flatMap { if (it.isDirectory) photoTree(it) else listOf(it) })
         changed()
@@ -298,6 +325,8 @@ object Store {
         background.execute {
             scan(photos + removed)
             photos.forEach { makeThumb(it) }
+            // В журнал описи — каждый снимок с отпечатком содержимого (в фоне: отпечаток — чтение файла).
+            photos.forEach { p -> p.parentFile?.let { Journal.add(it, "Снимок", relative(p), p) } }
         }
         changed()
     }
@@ -310,8 +339,13 @@ object Store {
             var target = File(to, f.name)
             var n = 2
             while (target.exists()) target = File(to, f.nameWithoutExtension + "_" + n++ + "." + f.extension)
+            val from = relative(f); val oldDir = f.parentFile!!
             if (!f.renameTo(target)) return@mapNotNull null
             thumbFile(f).let { t -> if (t.exists()) { thumbFile(target).parentFile?.mkdirs(); t.renameTo(thumbFile(target)) } }
+            val what = "$from → ${relative(target)}"
+            Journal.add(to, Journal.PHOTO_MOVED, what, target)
+            // В другую опись — в старой только «ушёл».
+            if (Inventory.objectOf(oldDir) != Inventory.objectOf(to)) Journal.add(oldDir, "Снимок удалён", what, File(oldDir, f.name), gone = true)
             target
         }
         scan(photos + moved)

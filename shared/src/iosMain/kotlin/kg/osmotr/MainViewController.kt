@@ -30,6 +30,8 @@ fun receiveFile(path: String, name: String) {
 private fun startScreens(): List<Screen> {
     val args = platform.Foundation.NSProcessInfo.processInfo.arguments.map { it.toString() }
     fun arg(name: String) = args.indexOf("-$name").takeIf { it >= 0 }?.let { args.getOrNull(it + 1) }
+    // Самопроверка журнала (подпись и отпечатки на этом iPhone) — итог в системный журнал, его читает CI.
+    if ("-selftest" in args) kg.osmotr.core.Platform.log(kg.osmotr.core.Journal.selfTest())
     val kind = arg("screen") ?: return emptyList()
     val path = arg("path")?.let { File(Store.root, it) } ?: Store.root
     return when (kind) {
