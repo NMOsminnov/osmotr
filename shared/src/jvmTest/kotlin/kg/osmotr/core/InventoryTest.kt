@@ -308,6 +308,14 @@ class InventoryTest {
         val first = items.first { it.inventory == "555/1" }
         val like = Inventory.similar(obj, listOf(first), Inventory.status(obj)).map { it.inventory }
         assertEquals(listOf("555/2", "555/3"), like)
+        // Порядок слов не важен, цена — за штуку и с допуском 1 % (автор: «аппарат ИВЛ и ИВЛ аппарат»).
+        fun item(name: String, initial: Double?, sum: Double? = null, qty: String = "") = Inventory.Item("Опись", "1", "x", name, initial, sum, "", "", 1, qty)
+        assertTrue(Inventory.isLike(item("Аппарат ИВЛ", 1_250_000.0), item("ИВЛ аппарат", 1_250_000.0)))
+        assertTrue("аппарат — латиницей", Inventory.isLike(item("Аппарат ИВЛ", 100.0), item("aппарат ИВЛ", 100.0)))
+        assertTrue("цена за штуку из суммы", Inventory.isLike(item("Ультразвуковая диагностика", 300_000.0), item("Ультразвуковая диагностика", null, 600_000.0, "2")))
+        assertTrue("в пределах 1 %", Inventory.isLike(item("Монитор", 18_500.0), item("Монитор", 18_600.0)))
+        assertTrue("за пределом — нет", !Inventory.isLike(item("Монитор", 18_500.0), item("Монитор", 18_800.0)))
+        assertTrue("другое слово — нет", !Inventory.isLike(item("Аппарат ИВЛ", 100.0), item("Аппарат УЗИ", 100.0)))
         // Без цены — такие же те, что тоже без цены.
         val noPrice = items.first { it.inventory == "555/5" }
         assertEquals(emptyList<String>(), Inventory.similar(obj, listOf(noPrice), Inventory.status(obj)).map { it.inventory })

@@ -78,6 +78,14 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.animateContentSize
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
@@ -127,10 +135,15 @@ fun BrowserScreen(
     val scope = rememberCoroutineScope()
     val version by Store.version.collectAsStateWithLifecycle()
     // Последнее содержимое папки — сразу, без пустого кадра; свежее подменит его по готовности.
+    // Папку переименовывают (сменился состав) — старую не перечитывать: её уже нет, и экран
+    // показал бы пустую сетку и «один предмет по имени», а через миг — новый состав.
     val listing by produceState(Visited.listing[dir], dir, version) {
-        value = withContext(Dispatchers.IO) { Store.list(dir) }.also { Visited.listing[dir] = it }
+        withContext(Dispatchers.IO) { if (dir.isDirectory) Store.list(dir) else null }?.let { value = it; Visited.listing[dir] = it }
     }
     val selected: SnapshotStateList<File> = remember(dir) { emptyList<File>().toMutableStateList() }
+    // Убранные из папки — прячутся сразу по касанию (уезжают анимацией), не дожидаясь диска;
+    // без ключа по папке: она переименуется, а пометка должна дожить до нового состава.
+    val leaving = remember { mutableStateListOf<String>() }
     var menu by remember { mutableStateOf(false) }
     var newFolder by remember { mutableStateOf(false) }
     var rename by remember { mutableStateOf(false) }
@@ -138,12 +151,13 @@ fun BrowserScreen(
     var moving by remember { mutableStateOf(false) }
     var movingFolder by remember { mutableStateOf(false) }
     var editingNote by remember { mutableStateOf(false) }
-    val note by produceState<String?>(null, dir, version) { value = withContext(Dispatchers.IO) { Store.note(dir) } }
-    val people by produceState(emptyList<Store.Contact>(), dir, version) { value = withContext(Dispatchers.IO) { Store.contacts(dir) } }
+    val note by produceState<String?>(null, dir, version) { if (dir.isDirectory) value = withContext(Dispatchers.IO) { Store.note(dir) } }
+    val people by produceState(emptyList<Store.Contact>(), dir, version) { if (dir.isDirectory) value = withContext(Dispatchers.IO) { Store.contacts(dir) } }
     // Опись объекта (если она в этой папке) и предметы описи, лежащие в этой папке; прошлое — сразу.
     val card by produceState(Visited.card[dir], dir, version) {
-        value = withContext(Dispatchers.IO) { cardOf(dir) }?.also { Visited.card[dir] = it }
+        withContext(Dispatchers.IO) { if (dir.isDirectory) cardOf(dir) else null }?.let { value = it; Visited.card[dir] = it }
     }
+    LaunchedEffect(card) { card?.items?.map { Inventory.key(Inventory.id(it)) }?.toSet()?.let { here -> leaving.retainAll(here) } }
     var zipping by remember { mutableStateOf<Float?>(null) }
     var zipError by remember { mutableStateOf<String?>(null) }
     // Новые описи: сразу несколько файлов, каждый — своя опись, без вопросов (та же загрузка,
@@ -318,8 +332,9 @@ fun BrowserScreen(
                         ItemCard(items, card?.similar.orEmpty(), pick = { Inventory.objectOf(dir.parentFile!!)?.let(pickItems) }, add = { more ->
                             scope.launch { withContext(Dispatchers.IO) { Inventory.addTo(dir, more).also { warmFolder(it); Inventory.refreshReportSoon(it) } }.let(renamed) }
                         }, remove = { one ->
+                            leaving += Inventory.key(Inventory.id(one))
                             scope.launch { withContext(Dispatchers.IO) { Inventory.removeFrom(dir, one).also { warmFolder(it); Inventory.refreshReportSoon(it) } }.let(renamed) }
-                        }, shot = { card?.status?.inspected(it) == true }, broken = { card?.status?.broken(it) == true }, setBroken = { one, on ->
+                        }, leaving = leaving, shot = { card?.status?.inspected(it) == true }, broken = { card?.status?.broken(it) == true }, setBroken = { one, on ->
                             card?.obj?.let { o -> scope.launch { withContext(Dispatchers.IO) { Inventory.setBroken(o, listOf(one), on); Inventory.refreshReportSoon(o) } } }
                         })
                     }
@@ -336,17 +351,22 @@ fun BrowserScreen(
                 }
                 if (l != null) {
                     items(inventories, key = { keyOf(it.dir) }, span = { GridItemSpan(maxLineSpan) }, contentType = { "inventory-folder" }) { tile ->
-                        InventoryRow(tile, tile.dir in selected, progress[tile.dir], onClick = { tap { if (selecting) toggle(tile.dir) else inventory(tile.dir) } })
+                        Box(Modifier.animateItem(fadeInSpec = motion(), placementSpec = motion(), fadeOutSpec = motion())) {
+                            InventoryRow(tile, tile.dir in selected, progress[tile.dir], onClick = { tap { if (selecting) toggle(tile.dir) else inventory(tile.dir) } })
+                        }
                     }
                     items(plain, key = { keyOf(it.dir) }, contentType = { "folder" }) { tile ->
-                        FolderCard(tile, tile.dir in selected, onClick = { tap { if (selecting) toggle(tile.dir) else open(tile.dir) } })
+                        Box(Modifier.animateItem(fadeInSpec = motion(), placementSpec = motion(), fadeOutSpec = motion())) {
+                            FolderCard(tile, tile.dir in selected, onClick = { tap { if (selecting) toggle(tile.dir) else open(tile.dir) } })
+                        }
                     }
                     if (l.folders.isNotEmpty() && l.photos.isNotEmpty()) item(span = { GridItemSpan(maxLineSpan) }, contentType = "header") {
                         Text(plural(l.photos.size, "снимок", "снимка", "снимков"), Modifier.padding(4.dp, 10.dp, 4.dp, 2.dp),
                             style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     items(l.photos, key = { keyOf(it) }, contentType = { "photo" }) { photo ->
-                        PhotoCell(photo, photo in selected, Modifier.clickable { tap { if (selecting) toggle(photo) else view(photo) } })
+                        PhotoCell(photo, photo in selected, Modifier.animateItem(fadeInSpec = motion(), placementSpec = motion(), fadeOutSpec = motion())
+                            .clickable { tap { if (selecting) toggle(photo) else view(photo) } })
                     }
                 }
             }
@@ -436,7 +456,7 @@ private fun FolderCard(tile: Store.FolderTile, selected: Boolean, onClick: () ->
     Box(Modifier.aspectRatio(1f).clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceVariant).clickable(onClick = onClick)) {
         tile.cover?.let { cover ->
             AsyncImage(
-                ImageRequest.Builder(coil3.compose.LocalPlatformContext.current).data(Store.thumbOrPhoto(cover).path.toPath()).size(Store.THUMB_PX).build(),
+                thumbRequest(cover),
                 contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize(),
             )
         }
@@ -502,10 +522,15 @@ private class AfterLongPress { var skip = false }
  */
 @Composable
 private fun ItemCard(items: List<Inventory.Item>, similar: List<Inventory.Item>, pick: () -> Unit, add: (List<Inventory.Item>) -> Unit, remove: (Inventory.Item) -> Unit,
-                     shot: (Inventory.Item) -> Boolean, broken: (Inventory.Item) -> Boolean, setBroken: (Inventory.Item, Boolean) -> Unit) {
-    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceVariant).padding(12.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        items.forEach { i ->
+                     leaving: List<String>, shot: (Inventory.Item) -> Boolean, broken: (Inventory.Item) -> Boolean, setBroken: (Inventory.Item, Boolean) -> Unit) {
+    // Состав меняется плавно: карточка растёт и сжимается, убранный уезжает, а не пропадает.
+    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceVariant)
+        .animateContentSize(motion()).padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        // Последний оставшийся — без «убрать»: папка без предмета не бывает.
+        val staying = items.count { Inventory.key(Inventory.id(it)) !in leaving }
+        items.forEach { i -> key(Inventory.key(Inventory.id(i))) {
+          AnimatedVisibility(Inventory.key(Inventory.id(i)) !in leaving, enter = fadeIn(motion()) + expandVertically(motion()),
+              exit = fadeOut(motion()) + shrinkVertically(motion())) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text("${i.inventory}  ·  № ${i.number}" + if (i.priority.isNotEmpty()) "  ·  П${i.priority}" else "",
@@ -524,9 +549,10 @@ private fun ItemCard(items: List<Inventory.Item>, similar: List<Inventory.Item>,
                         leadingIcon = { Icon(AppIcons.Block, null, Modifier.size(18.dp), tint = if (off) BROKEN_RED else MaterialTheme.colorScheme.onSurfaceVariant) },
                         colors = FilterChipDefaults.filterChipColors(selectedContainerColor = BROKEN_RED.copy(alpha = 0.18f)))
                 }
-                if (items.size > 1) IconButton(onClick = { remove(i) }) { Icon(Icons.Default.Close, "Убрать из папки", tint = MaterialTheme.colorScheme.onSurfaceVariant) }
+                if (staying > 1) IconButton(onClick = { remove(i) }) { Icon(Icons.Default.Close, "Убрать из папки", tint = MaterialTheme.colorScheme.onSurfaceVariant) }
             }
-        }
+          }
+        } }
         if (similar.isNotEmpty()) TextButton(onClick = { add(similar) }) {
             Icon(Icons.Default.Add, null); Text("  Ещё такие же в описи: ${similar.size} — сюда же")
         }
@@ -568,7 +594,12 @@ fun warmFolder(dir: File) {
     cardOf(dir)?.let { Visited.card[dir] = it }
 }
 
-private fun keyOf(f: File) = if (f.isDirectory) "d:" + f.path else f.path
+/**
+ * Ключ в сетке — по имени, не по пути и без обращения к диску: папку переименовали (сменился
+ * состав) — снимки в ней те же, и сетка не перерисовывает их как новые.
+ */
+private fun keyOf(f: File) = if (f.extension.lowercase() in PHOTO_KEYS) f.name else "d:" + f.name
+private val PHOTO_KEYS = setOf("jpg", "jpeg", "heic", "heif")
 
 /** «2 папки, 15 снимков». */
 private fun what(items: List<File>): String {
@@ -633,7 +664,7 @@ private fun PhotoCell(photo: File, selected: Boolean, modifier: Modifier) {
     val host = LocalHost.current
     Box(modifier.aspectRatio(1f).clip(RoundedCornerShape(6.dp)).background(MaterialTheme.colorScheme.surfaceVariant)) {
         AsyncImage(
-            ImageRequest.Builder(coil3.compose.LocalPlatformContext.current).data(Store.thumbOrPhoto(photo).path.toPath()).size(Store.THUMB_PX).build(),
+            thumbRequest(photo),
             contentDescription = photo.name, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize(),
         )
         if (selected) {
@@ -736,3 +767,12 @@ fun ImportDialog(jobs: List<ImportJob>, onClose: () -> Unit) {
         confirmButton = { if (finished) TextButton(onClick = onClose) { Text("Готово") } },
     )
 }
+
+/**
+ * Миниатюра — с ключом памяти по имени снимка: после переименования папки путь другой, а
+ * картинка та же — берётся из памяти сразу, без пустого квадрата и повторной загрузки.
+ */
+@Composable
+private fun thumbRequest(photo: File) = ImageRequest.Builder(coil3.compose.LocalPlatformContext.current)
+    .data(Store.thumbOrPhoto(photo).path.toPath()).size(Store.THUMB_PX)
+    .memoryCacheKey("thumb:" + photo.name).placeholderMemoryCacheKey("thumb:" + photo.name).build()

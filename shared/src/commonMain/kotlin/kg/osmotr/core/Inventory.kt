@@ -803,19 +803,29 @@ object Inventory {
     }
 
     /**
-     * «Такой же» предмет — то же наименование **и та же цена** (автор 09.10.2026: «имя + цена»):
-     * одинаковое название при разной стоимости — разные вещи (другая комплектация, другой год).
-     * Цена — первоначальная стоимость, нет её — сумма; копейки сравниваются целыми.
+     * «Такой же» предмет — то же наименование **и похожая цена** (автор 09.10.2026: «имя + цена»;
+     * «аппарат ИВЛ и ИВЛ аппарат должны считаться похожими, если цены тоже похожи»):
+     * - наименование — тот же набор слов в любом порядке, без регистра и знаков, латиница —
+     *   кириллицей ([nameKey]);
+     * - цена — за штуку: первоначальная, нет её — сумма, делённая на количество; похожая —
+     *   расходится не больше чем на 1 % (копейки округления, разные столбцы списков).
      */
-    fun likeKey(i: Item): String = Search.compact(i.name) + "|" + ((i.initial ?: i.sum)?.let { kotlin.math.round(it * 100).toLong() } ?: "")
+    fun isLike(a: Item, b: Item): Boolean = nameKey(a) == nameKey(b) && pricesClose(unitPrice(a), unitPrice(b))
 
-    /** Такие же в описи (наименование и цена), ещё не в этой папке — «добавить сюда?». */
+    fun nameKey(i: Item): String = Search.words(i.name).map(Search::fold).sorted().joinToString(" ")
+    fun unitPrice(i: Item): Double? = i.initial ?: i.sum?.let { s -> i.qty.toDoubleOrNull()?.takeIf { it > 1 }?.let { s / it } ?: s }
+    private fun pricesClose(a: Double?, b: Double?): Boolean = when {
+        a == null || b == null -> a == null && b == null
+        else -> kotlin.math.abs(a - b) <= maxOf(kotlin.math.abs(a), kotlin.math.abs(b)) * 0.01 + 0.005
+    }
+
+    /** Такие же в описи (наименование и цена), ещё не снятые и не в этой папке — «добавить сюда?». */
     fun similar(obj: File, here: List<Item>, st: Status): List<Item> {
         if (here.isEmpty()) return emptyList()
-        val like = here.map(::likeKey).toSet()
+        val names = here.map(::nameKey).toSet()
         val inHere = here.map { key(id(it)) }.toSet()
         return filesIn(obj).flatMap { parse(it).items }
-            .filter { likeKey(it) in like && key(id(it)) !in inHere && !st.inspected(it) }
+            .filter { nameKey(it) in names && key(id(it)) !in inHere && !st.inspected(it) && here.any { h -> isLike(h, it) } }
     }
 
     // ---------- Отчёт ----------

@@ -227,8 +227,8 @@ fun InventoryScreen(obj: File, into: File? = null, initialQuery: String? = null,
         }
         first?.takeIf { target != null && q.isEmpty() }?.let { was ->
             // Сверху — что уже в папке, за ним — такие же (наименование и цена), потом остальное.
-            val keys = was.map { Search.compact(it.inventory) }.toSet(); val like = was.map(Inventory::likeKey).toSet()
-            items = items.sortedBy { if (Search.compact(it.inventory) in keys) 0 else if (Inventory.likeKey(it) in like) 1 else 2 }
+            val keys = was.map { Search.compact(it.inventory) }.toSet()
+            items = items.sortedBy { i -> if (Search.compact(i.inventory) in keys) 0 else if (was.any { Inventory.isLike(it, i) }) 1 else 2 }
         }
         items
         }
@@ -359,7 +359,8 @@ fun InventoryScreen(obj: File, into: File? = null, initialQuery: String? = null,
                             val picked = i in selected || here
                             // В режиме набора — где предмет сейчас, если не здесь (добавление перенесёт его снимки сюда).
                             val elsewhere = if (target != null && !inHere(i)) st?.folderOf(i)?.takeIf { it.isDirectory } else null
-                            Row(Modifier.fillMaxWidth()
+                            // Отфильтровали, отметили, нашли — строки съезжают на места, а не прыгают.
+                            Row(Modifier.animateItem(fadeInSpec = motion(), placementSpec = motion(), fadeOutSpec = motion()).fillMaxWidth()
                                 .background(if (picked) MaterialTheme.colorScheme.primary.copy(alpha = 0.18f) else Color.Transparent)
                                 .combinedClickable(
                                     onClick = {

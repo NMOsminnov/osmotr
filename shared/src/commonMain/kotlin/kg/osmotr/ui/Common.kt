@@ -190,3 +190,10 @@ fun plural(n: Int, one: String, few: String, many: String): String {
     val w = if (m10 == 1 && m100 != 11) one else if (m10 in 2..4 && m100 !in 12..14) few else many
     return "$n $w"
 }
+
+/**
+ * Движение интерфейса — одно на всё приложение: появление, исчезновение и сдвиг элементов
+ * списков, рост и сжатие карточек. Коротко и мягко: список не перерисовывается рывком.
+ */
+fun <T> motion(): androidx.compose.animation.core.FiniteAnimationSpec<T> =
+    androidx.compose.animation.core.tween(durationMillis = 220, easing = androidx.compose.animation.core.FastOutSlowInEasing)
