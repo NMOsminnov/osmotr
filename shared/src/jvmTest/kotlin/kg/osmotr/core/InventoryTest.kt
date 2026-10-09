@@ -255,6 +255,39 @@ class InventoryTest {
         assertTrue(Inventory.status(obj).let { st -> !st.today(p.items.first { it.inventory == "М-205" }) })
     }
 
+    @Test fun нерабочие_отмечаются_разом_без_снимков_и_уходят_в_отчёт() {
+        val obj = objectWithInventory()
+        val items = Inventory.parse(Inventory.fileIn(obj)!!).items
+        val units = items.filter { it.name.startsWith("Серверный") }.take(2)
+        val car = items.first { it.inventory == "777/1011" }
+        // Два юнита и машина — разом, ни у кого ещё нет ни снимка, ни папки.
+        Inventory.setBroken(obj, units + car, true)
+        var st = Inventory.status(obj)
+        assertTrue((units + car).all(st::broken))
+        assertTrue("отметка — не осмотр", (units + car).none(st::inspected))
+        assertEquals(listOf("777/1001", "777/1002", "777/1011"), File(obj, Inventory.BROKEN).readLines())
+        // Машину починили — снять; второй раз отметить юнит — не задвоится.
+        Inventory.setBroken(obj, listOf(car, units[0]), false)
+        Inventory.setBroken(obj, listOf(units[0]), true)
+        assertEquals(listOf("777/1002", "777/1001"), File(obj, Inventory.BROKEN).readLines())
+        st = Inventory.status(obj)
+        assertTrue(!st.broken(car))
+        // Набрали «777 1002» — тот же предмет (ключ без разделителей).
+        assertTrue(Search.compact("777 1002") in st.brokenKeys)
+
+        Inventory.writeReport(obj)
+        val book = Xlsx.sheets(Inventory.reportFile(Inventory.fileIn(obj)!!).readBytes())
+        val list = book.first { it.name == "Опись" }.rows
+        val head = list[0]
+        assertEquals("Не работает", list.first { it.getOrNull(1) == "777/1001" }[head.indexOf("Состояние")])
+        assertEquals("", list.first { it.getOrNull(1) == "777/1003" }.getOrElse(head.indexOf("Состояние")) { "" })
+        val summary = book.first { it.name == "Итог" }.rows
+        assertEquals("2", summary[1][summary[0].indexOf("Нерабочих")])
+        // Все сняли — файла нет.
+        Inventory.setBroken(obj, units, false)
+        assertTrue(!File(obj, Inventory.BROKEN).exists())
+    }
+
     @Test fun имя_описи_из_файла_или_из_книги() {
         Store.init(root(), File(tmp.root.path + "/.app")); Store.ensureRoot()
         val f = File(tmp.newFile("b.xlsx").path)

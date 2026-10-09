@@ -130,7 +130,7 @@ suspend fun zipFolder(host: Host, dir: File, progress: (Float) -> Unit): Zipped 
     zipItems(host, listOf(dir), dir.parentFile ?: dir, if (dir == Store.root) "Осмотры" else dir.name, progress = progress)
 
 /** Выбранные папки и снимки — одним архивом; пути — от [base]. */
-private fun ours(name: String) = name == Store.NOTE || name == Store.CONTACTS || name == Inventory.MEMBERS ||
+private fun ours(name: String) = name == Store.NOTE || name == Store.CONTACTS || name == Inventory.MEMBERS || name == Inventory.BROKEN ||
     ((name.startsWith(Inventory.PREFIX) || name.startsWith("Осмотр — ")) && name.endsWith(".xlsx", true))
 
 /** Готовый архив: файл, сколько в нём снимков и сколько весит. */

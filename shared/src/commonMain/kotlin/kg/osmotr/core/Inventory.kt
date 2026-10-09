@@ -640,7 +640,10 @@ object Inventory {
      * первый и последний. Что с предметом не так (нет на месте, неисправен) — комментарием его папки.
      */
     class Status(val folder: Map<String, File>, val photos: Map<File, Int>,
-                 val first: Map<File, Long> = emptyMap(), val last: Map<File, Long> = emptyMap()) {
+                 val first: Map<File, Long> = emptyMap(), val last: Map<File, Long> = emptyMap(),
+                 val brokenKeys: Set<String> = emptySet()) {
+        /** Отмечен нерабочим (файл «Нерабочие.txt» описи) — независимо от снимков. */
+        fun broken(i: Item) = key(id(i)) in brokenKeys
         fun folderOf(i: Item) = folder[key(id(i))]
         fun photosOf(i: Item) = folderOf(i)?.let { photos[it] } ?: 0
         fun inspected(i: Item) = photosOf(i) > 0
@@ -662,7 +665,31 @@ object Inventory {
             photos[d] = n
             if (n > 0) { first[d] = lo; last[d] = hi }
         }
-        return Status(folder, photos, first, last)
+        return Status(folder, photos, first, last, brokenOf(obj))
+    }
+
+    // ---------- Нерабочие ----------
+    //
+    // Нерабочие предметы описи — файлом «Нерабочие.txt» в её папке, по инвентарнику на строку:
+    // виден на компьютере, уходит в архив, в отчёте — столбец «Состояние». Отметка не зависит от
+    // снимков: нерабочим можно отметить и то, что ещё не снимали (знают заранее).
+
+    const val BROKEN = "Нерабочие.txt"
+
+    private fun brokenLines(obj: File): List<String> = File(obj, BROKEN).takeIf { it.isFile }
+        ?.readLines()?.map { it.trim() }?.filter { it.isNotEmpty() }.orEmpty()
+
+    fun brokenOf(obj: File): Set<String> = brokenLines(obj).map(::key).toSet()
+
+    /** Отметить [items] нерабочими ([on]) или снять отметку; порядок строк в файле — как отмечали. */
+    fun setBroken(obj: File, items: List<Item>, on: Boolean) {
+        val lines = brokenLines(obj).toMutableList()
+        val keys = items.map { key(id(it)) }.toSet()
+        lines.removeAll { key(it) in keys }
+        if (on) lines += items.map(::id).distinctBy(::key)
+        val f = File(obj, BROKEN)
+        if (lines.isEmpty()) f.delete() else Store.writeDurably(f, (lines.joinToString("\n") + "\n").encodeToByteArray())
+        Store.changed()
     }
 
     // ---------- Выгрузки ----------
@@ -783,13 +810,14 @@ object Inventory {
             val p = parse(f)
             val lists = p.lists
             val head = listOf("№", "Инв. номер", "Наименование", "Место", "Кол-во", "Первонач. стоимость", "Сумма", "Приоритет", "Статус",
-                "Осмотрено", "Снимков", "Первый снимок", "Последний снимок", "Комментарий", "Папка")
+                "Осмотрено", "Состояние", "Снимков", "Первый снимок", "Последний снимок", "Комментарий", "Папка")
             val sheets = mutableListOf<Xlsx.Out>()
-            val total = listOf("Всего", "Осмотрено", "Не осмотрено", "Осмотрено, %", "Первонач. стоимость осмотренного")
+            val total = listOf("Всего", "Осмотрено", "Не осмотрено", "Осмотрено, %", "Первонач. стоимость осмотренного", "Нерабочих")
             fun line(name: String, items: List<Item>): List<Any?> {
                 val done = items.filter(st::inspected)
                 return listOf(name, items.size, done.size, items.size - done.size,
-                    if (items.isEmpty()) 0 else kotlin.math.round(done.size * 1000.0 / items.size) / 10.0, done.sumOf { it.initial ?: 0.0 })
+                    if (items.isEmpty()) 0 else kotlin.math.round(done.size * 1000.0 / items.size) / 10.0, done.sumOf { it.initial ?: 0.0 },
+                    items.count(st::broken))
             }
             val summary = mutableListOf<List<Any?>>(listOf("Список") + total)
             val notes = HashMap<File, String?>()  // комментарий папки — что с предметом не так (общая папка — один раз)
@@ -799,11 +827,12 @@ object Inventory {
                 val rows = listOf<List<Any?>>(head) + items.map { i ->
                     listOf(i.number.toLongOrNull() ?: i.number, i.inventory, i.name, i.place.ifEmpty { null }, i.qty.toLongOrNull() ?: i.qty.ifEmpty { null },
                         i.initial, i.sum, i.priority.toLongOrNull() ?: i.priority.ifEmpty { null }, i.status.ifEmpty { null },
-                        if (st.inspected(i)) "Да" else "Нет", st.photosOf(i), st.firstShot(i)?.let { WHEN.format(it) }, st.lastShot(i)?.let { WHEN.format(it) },
+                        if (st.inspected(i)) "Да" else "Нет", if (st.broken(i)) "Не работает" else null, st.photosOf(i), st.firstShot(i)?.let { WHEN.format(it) }, st.lastShot(i)?.let { WHEN.format(it) },
                         st.folderOf(i)?.let { notes.getOrPut(it) { Store.note(it) } }, st.folderOf(i)?.let { Store.relative(it) })
                 }
-                sheets += Xlsx.Out(l, rows, listOf(7, 18, 50, 16, 8, 16, 16, 10, 18, 11, 9, 17, 17, 40, 40)) { r ->
-                    if (r > 0 && st.inspected(items[r - 1])) Xlsx.GREEN else Xlsx.PLAIN
+                sheets += Xlsx.Out(l, rows, listOf(7, 18, 50, 16, 8, 16, 16, 10, 18, 11, 13, 9, 17, 17, 40, 40)) { r ->
+                    // Нерабочий — красным (важнее, чем «осмотрен»), осмотренный — зелёным.
+                    when { r == 0 -> Xlsx.PLAIN; st.broken(items[r - 1]) -> Xlsx.RED; st.inspected(items[r - 1]) -> Xlsx.GREEN; else -> Xlsx.PLAIN }
                 }
             }
             if (lists.size > 1) summary += line("Все списки", p.items)
@@ -823,7 +852,7 @@ object Inventory {
             val extra = obj.walkTopDown().onEnter { it == obj || !it.name.startsWith(".") }.filter { it.isDirectory && it != obj }
                 .filter { d -> (members(d).ifEmpty { listOf(invOfName(d.name)) }).none { key(it) in keys } && (d.listFiles()?.any(Store::isPhoto) == true) }
                 .map { d -> listOf<Any?>(d.relativeTo(obj).path, d.listFiles()?.count(Store::isPhoto) ?: 0, Store.note(d)) }.toList()
-            val book = listOf(Xlsx.Out("Итог", summary, listOf(24, 10, 12, 14, 14, 26))) + sheets +
+            val book = listOf(Xlsx.Out("Итог", summary, listOf(24, 10, 12, 14, 14, 26, 12))) + sheets +
                 listOf(Xlsx.Out("По дням", days, listOf(14, 24, 22))) +
                 (if (extra.isEmpty()) emptyList() else listOf(Xlsx.Out("Нет в описи", listOf(listOf<Any?>("Папка", "Снимков", "Комментарий")) + extra, listOf(40, 10, 50))))
             Xlsx.writeBook(reportFile(f), book)

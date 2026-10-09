@@ -66,6 +66,8 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
+import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -139,7 +141,8 @@ fun BrowserScreen(
     val note by produceState<String?>(null, dir, version) { value = withContext(Dispatchers.IO) { Store.note(dir) } }
     val people by produceState(emptyList<Store.Contact>(), dir, version) { value = withContext(Dispatchers.IO) { Store.contacts(dir) } }
     // Опись объекта (если она в этой папке) и предметы описи, лежащие в этой папке.
-    data class Card(val progress: Pair<Int, Int>?, val items: List<Inventory.Item>, val similar: List<Inventory.Item>)
+    data class Card(val progress: Pair<Int, Int>?, val items: List<Inventory.Item>, val similar: List<Inventory.Item>,
+                    val obj: File? = null, val broken: Set<String> = emptySet())
     val card by produceState<Card?>(null, dir, version) {
         value = withContext(Dispatchers.IO) {
             runCatching {
@@ -149,8 +152,9 @@ fun BrowserScreen(
                     all.count(st::inspected) to all.size
                 }
                 val items = if (dir == Store.root) emptyList() else Inventory.itemsIn(dir)
-                val similar = if (items.isEmpty()) emptyList() else Inventory.objectOf(dir.parentFile!!)?.let { o -> Inventory.similar(o, items, Inventory.status(o)) }.orEmpty()
-                Card(progress, items, similar)
+                val obj = if (items.isEmpty()) null else Inventory.objectOf(dir.parentFile!!)
+                val similar = obj?.let { o -> Inventory.similar(o, items, Inventory.status(o)) }.orEmpty()
+                Card(progress, items, similar, obj, obj?.let(Inventory::brokenOf).orEmpty())
             }.getOrNull()
         }
     }
@@ -329,6 +333,8 @@ fun BrowserScreen(
                             scope.launch { withContext(Dispatchers.IO) { Inventory.addTo(dir, more).also { Inventory.refreshReport(it) } }.let(renamed) }
                         }, remove = { one ->
                             scope.launch { withContext(Dispatchers.IO) { Inventory.removeFrom(dir, one).also { Inventory.refreshReport(it) } }.let(renamed) }
+                        }, broken = { Inventory.key(Inventory.id(it)) in card?.broken.orEmpty() }, setBroken = { one, on ->
+                            card?.obj?.let { o -> scope.launch { withContext(Dispatchers.IO) { Inventory.setBroken(o, listOf(one), on); Inventory.refreshReport(o) } } }
                         })
                     }
                 }
@@ -509,7 +515,8 @@ private class AfterLongPress { var skip = false }
  * нескольких — все, с «убрать». «Ещё такие же в описи» — одним касанием сюда же.
  */
 @Composable
-private fun ItemCard(items: List<Inventory.Item>, similar: List<Inventory.Item>, pick: () -> Unit, add: (List<Inventory.Item>) -> Unit, remove: (Inventory.Item) -> Unit) {
+private fun ItemCard(items: List<Inventory.Item>, similar: List<Inventory.Item>, pick: () -> Unit, add: (List<Inventory.Item>) -> Unit, remove: (Inventory.Item) -> Unit,
+                     broken: (Inventory.Item) -> Boolean, setBroken: (Inventory.Item, Boolean) -> Unit) {
     Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceVariant).padding(12.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)) {
         items.forEach { i ->
@@ -522,6 +529,11 @@ private fun ItemCard(items: List<Inventory.Item>, similar: List<Inventory.Item>,
                     if (i.place.isNotEmpty()) Text(i.place, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.secondary)
                     val cost = listOfNotNull(i.initial?.let { "первонач. ${money(it)}" }, i.sum?.takeIf { it != i.initial }?.let { "сумма ${money(it)}" })
                     if (cost.isNotEmpty()) Text(cost.joinToString(" · "), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    // Не работает — одним касанием, тут же и снять.
+                    val off = broken(i)
+                    FilterChip(off, { setBroken(i, !off) }, { Text(if (off) "Не работает" else "Отметить: не работает", color = if (off) BROKEN_RED else Color.Unspecified) },
+                        leadingIcon = { Icon(AppIcons.Block, null, Modifier.size(18.dp), tint = if (off) BROKEN_RED else MaterialTheme.colorScheme.onSurfaceVariant) },
+                        colors = FilterChipDefaults.filterChipColors(selectedContainerColor = BROKEN_RED.copy(alpha = 0.18f)))
                 }
                 if (items.size > 1) IconButton(onClick = { remove(i) }) { Icon(Icons.Default.Close, "Убрать из папки", tint = MaterialTheme.colorScheme.onSurfaceVariant) }
             }
