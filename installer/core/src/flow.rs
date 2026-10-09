@@ -86,9 +86,20 @@ async fn steps(ctx: &Ctx) -> R<Vec<String>> {
 
     // 2. Телефон на кабеле.
     ctx.step(StepId::Phone, StepState::Running, "Ищем iPhone");
+    let mut tick = 0u32;
     let device = loop {
         if let Some(d) = phone::find_usb().await? { break d }
-        ctx.hint("Подключите iPhone", "Подключите iPhone к компьютеру кабелем и разблокируйте его.", Some("cable"));
+        // Раз в 3 с — не готовит ли Windows драйвер уже подключённому iPhone.
+        if tick % 3 == 0 {
+            if phone::usb_present().await {
+                ctx.hint("Windows готовит iPhone", "iPhone подключён — Windows настраивает его в первый раз. Это до минуты. Разблокируйте телефон и подождите.", Some("unlock"));
+                ctx.step(StepId::Phone, StepState::Running, "Windows готовит iPhone");
+            } else {
+                ctx.hint("Подключите iPhone", "Подключите iPhone к компьютеру кабелем и разблокируйте его.", Some("cable"));
+                ctx.step(StepId::Phone, StepState::Running, "Ищем iPhone");
+            }
+        }
+        tick += 1;
         tokio::time::sleep(Duration::from_secs(1)).await;
     };
     ctx.hint_done();
@@ -136,7 +147,7 @@ async fn steps(ctx: &Ctx) -> R<Vec<String>> {
     // 5. SideStore + файл пары.
     ctx.step(StepId::SideStore, StepState::Running, "Скачиваем");
     let ss_ipa = ctx.work.join("SideStore.ipa");
-    apps::download(apps::SIDESTORE_URL, &ss_ipa, |p| ctx.step(StepId::SideStore, StepState::Running, format!("Скачиваем — {} %", (p * 100.0) as i32))).await?;
+    apps::download(apps::SIDESTORE_URL, &ss_ipa, |g, t| ctx.step(StepId::SideStore, StepState::Running, format!("Скачиваем — {}", apps::of(g, t)))).await?;
     ctx.step(StepId::SideStore, StepState::Running, "Подписываем и ставим");
     apps::sign_and_install(&mut signer, &phone, &ss_ipa, |p| ctx.step(StepId::SideStore, StepState::Running, format!("Ставим — {} %", (p * 100.0) as i32))).await?;
     match apps::sidestore_id(&phone).await? {

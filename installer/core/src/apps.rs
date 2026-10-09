@@ -14,8 +14,8 @@ pub const SIDESTORE_URL: &str = "https://github.com/SideStore/SideStore/releases
 /// не продлевает подпись (docs.sidestore.io).
 pub const LOCALDEVVPN_ID: i64 = 6755608044;
 
-/// Скачать [url] в [dest]; [progress] — доля 0…1.
-pub async fn download(url: &str, dest: &Path, progress: impl Fn(f32)) -> R<()> {
+/// Скачать [url] в [dest]; [progress] — скачано и всего, байт (всего 0 — неизвестно).
+pub async fn download(url: &str, dest: &Path, progress: impl Fn(u64, u64)) -> R<()> {
     let client = reqwest::Client::builder().user_agent("osmotr-setup").build().explain("Нет интернета")?;
     let resp = client.get(url).send().await.explain("Нет интернета — не скачали файл")?;
     if !resp.status().is_success() {
@@ -25,12 +25,14 @@ pub async fn download(url: &str, dest: &Path, progress: impl Fn(f32)) -> R<()> {
     let tmp = dest.with_extension("part");
     let mut out = tokio::fs::File::create(&tmp).await.explain("Не записали файл на диск")?;
     let mut got = 0u64;
+    let mut shown = u64::MAX;  // окну — только когда сменился процент (или мегабайт), а не на каждый кусок
     let mut body = resp.bytes_stream();
     while let Some(chunk) = body.next().await {
         let chunk = chunk.explain("Скачивание прервалось — проверьте интернет")?;
         out.write_all(&chunk).await.explain("Не записали файл на диск")?;
         got += chunk.len() as u64;
-        if total > 0 { progress(got as f32 / total as f32) }
+        let mark = if total > 0 { got * 100 / total } else { got >> 20 };
+        if mark != shown { shown = mark; progress(got, total) }
     }
     out.flush().await.explain("Не записали файл на диск")?;
     drop(out);
@@ -39,9 +41,21 @@ pub async fn download(url: &str, dest: &Path, progress: impl Fn(f32)) -> R<()> {
 }
 
 /// Подписать Apple ID человека и поставить на телефон.
+/// «40 % из 203 МБ» — для подписи шага.
+pub fn of(got: u64, total: u64) -> String {
+    let mb = |b: u64| b as f64 / 1_048_576.0;
+    if total > 0 { format!("{} % из {:.0} МБ", got * 100 / total, mb(total)) } else { format!("{:.0} МБ", mb(got)) }
+}
+
 pub async fn sign_and_install(signer: &mut Signer, phone: &Phone, ipa: &Path, progress: impl Fn(f32)) -> R<()> {
     let provider = phone.provider()?;
-    let cb = |p: f32| { progress(p); std::future::ready(()) };
+    // Окну — только при смене процента.
+    let shown = std::sync::atomic::AtomicI32::new(-1);
+    let cb = |p: f32| {
+        let pct = (p * 100.0) as i32;
+        if shown.swap(pct, std::sync::atomic::Ordering::Relaxed) != pct { progress(p) }
+        std::future::ready(())
+    };
     signer.install_app(&provider, ipa.to_path_buf(), false, Some(cb), None).await
         .map_err(|e| install_failure(&format!("{e:?}")))?;
     Ok(())

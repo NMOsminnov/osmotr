@@ -8,6 +8,8 @@ use osmotr_setup::{Answer, Event, flow};
 #[tokio::main]
 async fn main() {
     let _ = rustls::crypto::ring::default_provider().install_default();
+    // «clean-phone» — снять с подключённого iPhone то, что ставит установщик (проверки на «чистом»).
+    if std::env::args().nth(1).as_deref() == Some("clean-phone") { return clean_phone().await }
     let mut args = std::env::args().skip(1);
     let work = args.next().map(Into::into).unwrap_or_else(|| std::env::temp_dir().join("osmotr-setup"));
     let ipa = args.next().map(Into::into).unwrap_or_else(|| std::path::PathBuf::from("Osmotr.ipa"));
@@ -40,4 +42,19 @@ async fn main() {
         }
     }
     let _ = job.await;
+}
+
+/// Снять с телефона «Осмотр», SideStore и LocalDevVPN — по подписи на экране.
+async fn clean_phone() {
+    use osmotr_setup::phone;
+    let Ok(Some(dev)) = phone::find_usb().await else { println!("iPhone не подключён (или нет службы Apple) — с телефона ничего не снято"); return };
+    if !phone::paired(&dev.udid).await { println!("С телефоном нет знакомства — с телефона ничего не снято"); return }
+    let Ok(p) = phone::describe(dev).await else { println!("Телефон не отвечает"); return };
+    let apps = phone::installed(&p).await.unwrap_or_default();
+    for (id, name) in apps.iter().filter(|(_, n)| ["Осмотр", "SideStore", "LocalDevVPN"].contains(&n.as_str())) {
+        match phone::uninstall(&p, id).await {
+            Ok(()) => println!("Снято с телефона: {name} ({id})"),
+            Err(e) => println!("Не снято: {name} — {}", e.text),
+        }
+    }
 }

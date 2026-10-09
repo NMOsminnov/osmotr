@@ -36,7 +36,7 @@ pub async fn install(work: &Path, progress: impl Fn(&str, f32)) -> R<()> {
         tokio::fs::create_dir_all(&dir).await.map_err(|e| Failure::new("Не создали папку для драйверов", e))?;
         let setup = dir.join("iTunes64Setup.exe");
         if !setup.exists() {
-            crate::apps::download(ITUNES_URL, &setup, |p| progress("Скачиваем драйверы Apple", p * 0.8)).await?;
+            crate::apps::download(ITUNES_URL, &setup, |g, t| progress(&format!("Скачиваем драйверы Apple — {}", crate::apps::of(g, t)), 0.0)).await?;
         }
         progress("Распаковываем драйверы", 0.82);
         let st = tokio::process::Command::new(&setup).arg("/extract").current_dir(&dir).status().await

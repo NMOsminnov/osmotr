@@ -57,6 +57,20 @@ pub async fn find_usb() -> R<Option<UsbmuxdDevice>> {
     Ok(devs.into_iter().find(|d| matches!(d.connection_type, Connection::Usb)))
 }
 
+/// iPhone на шине USB, даже если служба Apple его ещё не видит: при первом подключении Windows
+/// сама ставит ему драйвер — до минуты, и всё это время программа иначе молча ждала бы.
+pub async fn usb_present() -> bool {
+    #[cfg(windows)]
+    {
+        let out = tokio::process::Command::new("powershell")
+            .args(["-NoProfile", "-Command", "if (Get-PnpDevice -PresentOnly -ErrorAction SilentlyContinue | Where-Object { $_.InstanceId -match 'VID_05AC' }) { 'yes' }"])
+            .creation_flags(0x0800_0000).output().await;
+        return out.map(|o| String::from_utf8_lossy(&o.stdout).contains("yes")).unwrap_or(false);
+    }
+    #[cfg(not(windows))]
+    false
+}
+
 /// Есть ли уже знакомство (запись пары) с этим телефоном.
 pub async fn paired(udid: &str) -> bool {
     match usbmux().await {
@@ -156,6 +170,13 @@ pub async fn installed(phone: &Phone) -> R<Vec<(String, String)>> {
         let name = v.as_dictionary().and_then(|d| d.get("CFBundleDisplayName").or(d.get("CFBundleName"))).and_then(|x| x.as_string()).unwrap_or("").to_string();
         (id, name)
     }).collect())
+}
+
+/// Удалить приложение с телефона (для проверок на «чистом»).
+pub async fn uninstall(phone: &Phone, bundle_id: &str) -> R<()> {
+    let provider = phone.provider()?;
+    let mut ip = InstallationProxyClient::connect(&provider).await.explain("Телефон не дал удалить приложение")?;
+    ip.uninstall(bundle_id, None).await.explain("Телефон не удалил приложение")
 }
 
 async fn amfi(phone: &Phone) -> R<AmfiClient> {
