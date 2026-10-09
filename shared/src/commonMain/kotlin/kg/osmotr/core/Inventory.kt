@@ -642,8 +642,8 @@ object Inventory {
     class Status(val folder: Map<String, File>, val photos: Map<File, Int>,
                  val first: Map<File, Long> = emptyMap(), val last: Map<File, Long> = emptyMap(),
                  val brokenKeys: Set<String> = emptySet()) {
-        /** Отмечен нерабочим (файл «Нерабочие.txt» описи) — независимо от снимков. */
-        fun broken(i: Item) = key(id(i)) in brokenKeys
+        /** Нерабочее (на списание) — отмечено в «Нерабочие.txt» описи и снято: без снимков отметка не действует. */
+        fun broken(i: Item) = inspected(i) && key(id(i)) in brokenKeys
         fun folderOf(i: Item) = folder[key(id(i))]
         fun photosOf(i: Item) = folderOf(i)?.let { photos[it] } ?: 0
         fun inspected(i: Item) = photosOf(i) > 0
@@ -670,9 +670,10 @@ object Inventory {
 
     // ---------- Нерабочие ----------
     //
-    // Нерабочие предметы описи — файлом «Нерабочие.txt» в её папке, по инвентарнику на строку:
-    // виден на компьютере, уходит в архив, в отчёте — столбец «Состояние». Отметка не зависит от
-    // снимков: нерабочим можно отметить и то, что ещё не снимали (знают заранее).
+    // Нерабочие (на списание) предметы описи — файлом «Нерабочие.txt» в её папке, по инвентарнику
+    // на строку: виден на компьютере, уходит в архив, в отчёте — столбец «Состояние». Отметить
+    // можно только снятое (автор 09.10.2026: «делаем фотографии, и только потом можем как
+    // нерабочее/списанное помечать») — в папке предмета; снимки удалили — отметка не действует.
 
     const val BROKEN = "Нерабочие.txt"
 
@@ -681,15 +682,21 @@ object Inventory {
 
     fun brokenOf(obj: File): Set<String> = brokenLines(obj).map(::key).toSet()
 
-    /** Отметить [items] нерабочими ([on]) или снять отметку; порядок строк в файле — как отмечали. */
-    fun setBroken(obj: File, items: List<Item>, on: Boolean) {
+    /**
+     * Отметить [items] нерабочими ([on]) или снять отметку; порядок строк в файле — как отмечали.
+     * Отмечаются только снятые; сколько отмечено — в ответе.
+     */
+    fun setBroken(obj: File, items: List<Item>, on: Boolean): Int {
         val lines = brokenLines(obj).toMutableList()
-        val keys = items.map { key(id(it)) }.toSet()
+        val st = if (on) status(obj) else null
+        val take = if (on) items.filter { st!!.inspected(it) } else items
+        val keys = take.map { key(id(it)) }.toSet()
         lines.removeAll { key(it) in keys }
-        if (on) lines += items.map(::id).distinctBy(::key)
+        if (on) lines += take.map(::id).distinctBy(::key)
         val f = File(obj, BROKEN)
         if (lines.isEmpty()) f.delete() else Store.writeDurably(f, (lines.joinToString("\n") + "\n").encodeToByteArray())
         Store.changed()
+        return take.size
     }
 
     // ---------- Выгрузки ----------
@@ -827,7 +834,7 @@ object Inventory {
                 val rows = listOf<List<Any?>>(head) + items.map { i ->
                     listOf(i.number.toLongOrNull() ?: i.number, i.inventory, i.name, i.place.ifEmpty { null }, i.qty.toLongOrNull() ?: i.qty.ifEmpty { null },
                         i.initial, i.sum, i.priority.toLongOrNull() ?: i.priority.ifEmpty { null }, i.status.ifEmpty { null },
-                        if (st.inspected(i)) "Да" else "Нет", if (st.broken(i)) "Не работает" else null, st.photosOf(i), st.firstShot(i)?.let { WHEN.format(it) }, st.lastShot(i)?.let { WHEN.format(it) },
+                        if (st.inspected(i)) "Да" else "Нет", if (st.broken(i)) "Нерабочее" else null, st.photosOf(i), st.firstShot(i)?.let { WHEN.format(it) }, st.lastShot(i)?.let { WHEN.format(it) },
                         st.folderOf(i)?.let { notes.getOrPut(it) { Store.note(it) } }, st.folderOf(i)?.let { Store.relative(it) })
                 }
                 sheets += Xlsx.Out(l, rows, listOf(7, 18, 50, 16, 8, 16, 16, 10, 18, 11, 13, 9, 17, 17, 40, 40)) { r ->

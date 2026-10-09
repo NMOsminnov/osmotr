@@ -142,7 +142,7 @@ fun BrowserScreen(
     val people by produceState(emptyList<Store.Contact>(), dir, version) { value = withContext(Dispatchers.IO) { Store.contacts(dir) } }
     // Опись объекта (если она в этой папке) и предметы описи, лежащие в этой папке.
     data class Card(val progress: Pair<Int, Int>?, val items: List<Inventory.Item>, val similar: List<Inventory.Item>,
-                    val obj: File? = null, val broken: Set<String> = emptySet())
+                    val obj: File? = null, val status: Inventory.Status? = null)
     val card by produceState<Card?>(null, dir, version) {
         value = withContext(Dispatchers.IO) {
             runCatching {
@@ -153,8 +153,9 @@ fun BrowserScreen(
                 }
                 val items = if (dir == Store.root) emptyList() else Inventory.itemsIn(dir)
                 val obj = if (items.isEmpty()) null else Inventory.objectOf(dir.parentFile!!)
-                val similar = obj?.let { o -> Inventory.similar(o, items, Inventory.status(o)) }.orEmpty()
-                Card(progress, items, similar, obj, obj?.let(Inventory::brokenOf).orEmpty())
+                val st = obj?.let(Inventory::status)
+                val similar = if (obj == null || st == null) emptyList() else Inventory.similar(obj, items, st)
+                Card(progress, items, similar, obj, st)
             }.getOrNull()
         }
     }
@@ -333,7 +334,7 @@ fun BrowserScreen(
                             scope.launch { withContext(Dispatchers.IO) { Inventory.addTo(dir, more).also { Inventory.refreshReport(it) } }.let(renamed) }
                         }, remove = { one ->
                             scope.launch { withContext(Dispatchers.IO) { Inventory.removeFrom(dir, one).also { Inventory.refreshReport(it) } }.let(renamed) }
-                        }, broken = { Inventory.key(Inventory.id(it)) in card?.broken.orEmpty() }, setBroken = { one, on ->
+                        }, shot = { card?.status?.inspected(it) == true }, broken = { card?.status?.broken(it) == true }, setBroken = { one, on ->
                             card?.obj?.let { o -> scope.launch { withContext(Dispatchers.IO) { Inventory.setBroken(o, listOf(one), on); Inventory.refreshReport(o) } } }
                         })
                     }
@@ -516,7 +517,7 @@ private class AfterLongPress { var skip = false }
  */
 @Composable
 private fun ItemCard(items: List<Inventory.Item>, similar: List<Inventory.Item>, pick: () -> Unit, add: (List<Inventory.Item>) -> Unit, remove: (Inventory.Item) -> Unit,
-                     broken: (Inventory.Item) -> Boolean, setBroken: (Inventory.Item, Boolean) -> Unit) {
+                     shot: (Inventory.Item) -> Boolean, broken: (Inventory.Item) -> Boolean, setBroken: (Inventory.Item, Boolean) -> Unit) {
     Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceVariant).padding(12.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)) {
         items.forEach { i ->
@@ -529,9 +530,12 @@ private fun ItemCard(items: List<Inventory.Item>, similar: List<Inventory.Item>,
                     if (i.place.isNotEmpty()) Text(i.place, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.secondary)
                     val cost = listOfNotNull(i.initial?.let { "первонач. ${money(it)}" }, i.sum?.takeIf { it != i.initial }?.let { "сумма ${money(it)}" })
                     if (cost.isNotEmpty()) Text(cost.joinToString(" · "), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    // Не работает — одним касанием, тут же и снять.
-                    val off = broken(i)
-                    FilterChip(off, { setBroken(i, !off) }, { Text(if (off) "Не работает" else "Отметить: не работает", color = if (off) BROKEN_RED else Color.Unspecified) },
+                    // Нерабочее (на списание) — одним касанием, тут же и снять; только после снимков.
+                    val off = broken(i); val can = shot(i)
+                    FilterChip(off, { setBroken(i, !off) }, {
+                        Text(when { off -> "Нерабочее, на списание"; can -> "Отметить: нерабочее"; else -> "Нерабочее — сначала снимки" },
+                            color = if (off) BROKEN_RED else Color.Unspecified)
+                    }, enabled = can || off,
                         leadingIcon = { Icon(AppIcons.Block, null, Modifier.size(18.dp), tint = if (off) BROKEN_RED else MaterialTheme.colorScheme.onSurfaceVariant) },
                         colors = FilterChipDefaults.filterChipColors(selectedContainerColor = BROKEN_RED.copy(alpha = 0.18f)))
                 }

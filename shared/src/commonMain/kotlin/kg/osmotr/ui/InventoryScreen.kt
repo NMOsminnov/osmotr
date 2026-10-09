@@ -109,7 +109,8 @@ fun money(v: Double?): String {
  * предмет тут же), сколько осмотрено, фильтры (список, статус, «только неосмотренные»),
  * порядок (№, приоритет, стоимость). Касание — папка предмета (нет — создаётся) с «Снимать»;
  * вернулся — тот же список на том же месте, предмет уже отмечен. Зажатие — отметить несколько и
- * «В одну папку» (похожие предметы — три одинаковых юнита) или «Нерабочие» — разом, без захода в папки.
+ * «В одну папку» (похожие предметы — три одинаковых юнита). Нерабочее отмечается в папке предмета,
+ * после снимков; в списке — красная пометка и фильтр «Нерабочие».
  */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
@@ -239,22 +240,7 @@ fun InventoryScreen(obj: File, into: File? = null, initialQuery: String? = null,
                 },
             ) else if (selected.isNotEmpty()) TopAppBar(
                 navigationIcon = { IconButton(onClick = { selected.clear() }) { Icon(Icons.Default.Close, "Снять выбор") } },
-                // Одно число, как в галерее: рядом с «Нерабочие» «Отмечено: 3» переносилось на две строки.
-                title = { Text("${selected.size}", maxLines = 1) },
-                actions = {
-                    // Все отмеченные уже нерабочие — кнопка снимает отметку, иначе — ставит.
-                    val allBroken = st != null && selected.all(st::broken)
-                    TextButton(onClick = {
-                        val items = selected.toList(); selected.clear()
-                        scope.launch {
-                            withContext(Dispatchers.IO) { Inventory.setBroken(obj, items, !allBroken) }
-                            host.toast(if (allBroken) "Снова рабочие: ${items.size}" else "Нерабочие: ${items.size}")
-                        }
-                    }) {
-                        Icon(AppIcons.Block, null, tint = if (allBroken) MaterialTheme.colorScheme.primary else BROKEN_RED)
-                        Text(if (allBroken) "  Рабочие" else "  Нерабочие", color = if (allBroken) MaterialTheme.colorScheme.primary else BROKEN_RED)
-                    }
-                },
+                title = { Text("Отмечено: ${selected.size}") },
             ) else TopAppBar(
                 navigationIcon = { IconButton(onClick = close) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Назад") } },
                 title = { Column { Text(obj.name, maxLines = 1, overflow = TextOverflow.Ellipsis); Text("Опись", style = MaterialTheme.typography.labelMedium,
@@ -317,8 +303,8 @@ fun InventoryScreen(obj: File, into: File? = null, initialQuery: String? = null,
                     val done = scope2.count { st?.inspected(it) == true }
                     Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp)) {
                         val today = scope2.count { st?.today(it) == true }
-                        val broken = scope2.count { st?.broken(it) == true }
-                        Text("Осмотрено $done из ${scope2.size}" + (if (today > 0) " · сегодня +$today" else "") + (if (broken > 0) " · нерабочих $broken" else ""),
+                        // Нерабочих — на красном фильтре ниже: в строке рядом с «сегодня +N» число обрезалось.
+                        Text("Осмотрено $done из ${scope2.size}" + if (today > 0) " · сегодня +$today" else "",
                             style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         LinearProgressIndicator(progress = { if (scope2.isEmpty()) 0f else done.toFloat() / scope2.size }, Modifier.fillMaxWidth().padding(top = 4.dp))
                     }
@@ -544,5 +530,5 @@ fun ParseProgress(dir: File?, modifier: Modifier = Modifier, compact: Boolean = 
 val BROKEN_RED = Color(0xFFF85149)
 
 @Composable
-fun BrokenLabel() = Text("не работает", Modifier.clip(RoundedCornerShape(6.dp)).background(BROKEN_RED.copy(alpha = 0.2f)).padding(horizontal = 6.dp),
+fun BrokenLabel() = Text("нерабочее", Modifier.clip(RoundedCornerShape(6.dp)).background(BROKEN_RED.copy(alpha = 0.2f)).padding(horizontal = 6.dp),
     style = MaterialTheme.typography.labelSmall, color = BROKEN_RED, maxLines = 1)
