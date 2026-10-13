@@ -25,6 +25,11 @@ object Inventory {
         val list: String, val number: String, val inventory: String, val name: String,
         val initial: Double?, val sum: Double?, val priority: String, val status: String, val row: Int,
         val qty: String = "", val place: String = "",
+        /**
+         * Свой ключ предмета без инвентарника, когда его номер в описи повторяется (нумерация
+         * заново в каждом разделе): «№6 (Склад, стр. 11)». Пусто — ключ «№6» (см. [id]).
+         */
+        val key: String = "",
     )
 
     /**
@@ -106,7 +111,9 @@ object Inventory {
             }
             Field.NUMBER -> when {
                 has("инв", "заводск", "паспорт") -> -10
-                r == "№" || r == "п/п" || r == "пп" || r == "р/с" || r == "#" || r == "n" || en == "no" || en == "no." || en == "nr" -> 12
+                // «Н/п» — «номер по порядку» (13.10.2026: без него столбец номера не находился, и
+                // нумерация заново в каждом разделе терялась — номера шли подряд).
+                r == "№" || r == "п/п" || r == "пп" || r == "н/п" || r == "нп" || r == "р/с" || r == "#" || r == "n" || en == "no" || en == "no." || en == "nr" -> 12
                 has("п/п", "п. п", "по порядку", "порядков", "№ по списку", "номер в списке", "р/с") -> 12
                 r.startsWith("№") && r.length <= 4 -> 10
                 r == "номер" -> 4
@@ -313,6 +320,8 @@ object Inventory {
         r.any { it.isNotBlank() } && r.none(::isTotal) &&
             !repeatOf(r, headers) && !isNumbering(r) && sectionOf(r) == null
 
+    /** Явная пометка инвентарника в тексте: «инв. №», «инв.ном», «inv no». */
+    private val INV_MARK = Regex("""(?iu)(?:^|[^\p{L}])(инв|inv)[a-zа-я]*\.?\s*(№|n\b|no\b|номер|ном)""")
     private val INV_IN_NAME = Regex("""[,;(]?\s*(?:инв|inv)[a-zа-я]*\.?\s*(?:№|n|no|номер)?\s*[:.]?\s*([0-9A-Za-zА-Яа-яЁё](?:[0-9A-Za-zА-Яа-яЁё/.,\-]| (?=\d))*[0-9A-Za-zА-Яа-яЁё])\)?""", RegexOption.IGNORE_CASE)
 
     /** Таблица листа; null — на листе нет списка предметов (нет ни инвентарников, ни наименований). */
@@ -386,7 +395,12 @@ object Inventory {
      * — место; любой другой — список предметов, а список — это приоритет (автор, 09.10.2026: «Там не
      * подразделения, а списки. Это приоритеты»).
      */
-    private val PLACE_SECTION = Regex("""(?iu)^\s*(здани|корпус|кабинет|каб\.|каб\s|этаж|цех|комнат|помещени|склад|лаборатор|room|building|floor|office|block)""")
+    /**
+     * Раздел — место, а не список: начинается с вида помещения или называет этаж, корпус,
+     * кабинет где угодно в строке («Коридор, 1 этаж», «Холл у входа»). Прежде — только по
+     * началу строки, и «Коридор, 1 этаж» уходил в списки (13.10.2026).
+     */
+    private val PLACE_SECTION = Regex("""(?iu)^\s*(здани|корпус|кабинет|каб\.|каб\s|этаж|цех|комнат|помещени|склад|лаборатор|коридор|холл|фойе|вестибюл|подвал|чердак|гараж|серверн|котельн|кладов|тамбур|лестниц|кухн|столов|актов|зал\b|двор|территори|room|building|floor|office|block|hall|corridor)|\b(\d+\s*этаж|этаж\s*\d+|корпус|кабинет|каб\.\s*\d)""")
 
     /** Номер приоритета из названия списка: «Список 1», «1 приоритет», «П2», «Приоритет №3». */
     fun priorityOfList(name: String): String {
@@ -411,7 +425,9 @@ object Inventory {
             sectionOf(r)?.let { sec -> cell(r, Field.INVENTORY).let { if (it.isEmpty() || it == sec) { section(sec); continue } } }
             if (!dataRow(r, t.headers)) continue
             var inv = cell(r, Field.INVENTORY); var name = cell(r, Field.NAME)
-            if (t.invFromName && inv.isEmpty()) INV_IN_NAME.find(name)?.let { m ->
+            // Инвентарник в наименовании: столбца нет вовсе — или он есть, но в этой строке пуст, а в
+            // названии явно «инв. №…» («Монитор Samsung 24 инв. № 013/4501», 13.10.2026).
+            if (inv.isEmpty() && (t.invFromName || INV_MARK.containsMatchIn(name))) INV_IN_NAME.find(name)?.let { m ->
                 inv = m.groupValues[1]; name = name.removeRange(m.range).trim(' ', ',', ';', '.', '-')
             }
             if (inv.isEmpty() && name.isEmpty()) continue
@@ -431,7 +447,22 @@ object Inventory {
 
     /** Ключ инвентарника для сравнения и id предмета (как в Инвентарники.txt). */
     fun key(inv: String) = Search.compact(inv)
-    fun id(i: Item) = i.inventory.ifEmpty { "№" + i.number }
+    fun id(i: Item) = i.inventory.ifEmpty { i.key.ifEmpty { "№" + i.number } }
+
+    /**
+     * Предметы без инвентарника с одинаковым номером — разные предметы: нумерация начинается
+     * заново в каждом разделе, и «№6» перегородки и «№6» паллеты иначе делили бы одну папку и
+     * одну отметку «осмотрено» (13.10.2026). Первый остаётся «№6» (папки прежних версий не
+     * теряются), следующим — список и строка.
+     */
+    fun distinctIds(items: List<Item>): List<Item> {
+        val seen = HashSet<String>()
+        return items.map { i ->
+            if (i.inventory.isNotEmpty()) i
+            else if (seen.add("№" + i.number)) i
+            else i.copy(key = "№${i.number} (${i.list}, стр. ${i.row})")
+        }
+    }
 
     /**
      * Имя папки предмета: «№ в описи. инвентарник» — «13. 1562∕65»; нет инвентарника — просто
@@ -455,7 +486,7 @@ object Inventory {
 
     /** Вся опись из байтов книги (без папки и кэша). */
     fun parseBook(book: ByteArray, progress: ((Float, String) -> Unit)? = null): List<Item> =
-        Xlsx.sheets(book, progress).flatMap { s -> detect(s)?.let { items(s, it) }.orEmpty() }
+        distinctIds(Xlsx.sheets(book, progress).flatMap { s -> detect(s)?.let { items(s, it) }.orEmpty() })
 
     // ---------- Опись в папке ----------
 
@@ -621,7 +652,7 @@ object Inventory {
     @kotlinx.serialization.Serializable
     private class Cached(val items: List<Item>)
     private val json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
-    private fun cacheFile(f: File) = File(Store.cacheDir, "inventory/" + ("v6|" + f.absolutePath + "|" + f.length() + "|" + f.lastModified()).hashCode() + ".json")
+    private fun cacheFile(f: File) = File(Store.cacheDir, "inventory/" + ("v7|" + f.absolutePath + "|" + f.length() + "|" + f.lastModified()).hashCode() + ".json")
     private fun cached(f: File, cache: File): Parsed? = runCatching { if (cache.isFile) Parsed(f, json.decodeFromString<Cached>(cache.readText()).items) else null }.getOrNull()
 
     /**
@@ -651,7 +682,7 @@ object Inventory {
         val sheets = Xlsx.sheets(book, progress = { part, sheet -> tell(f, 0.85f * part, "Читаем лист «$sheet»") }); lap("листы")
         tell(f, 0.88f, "Ищем столбцы")
         val tables = sheets.mapNotNull { s -> detect(s)?.let { s to it } }; lap("столбцы")
-        val items = tables.flatMap { (s, tb) -> items(s, tb) }; lap("предметы")
+        val items = distinctIds(tables.flatMap { (s, tb) -> items(s, tb) }); lap("предметы")
         tell(f, 0.97f, "Собираем список: ${items.size} предметов")
         runCatching { cache.parentFile?.mkdirs(); cache.writeText(json.encodeToString(Cached.serializer(), Cached(items))) }; lap("кэш")
         Platform.log("разбор ${f.name}: ${items.size} предметов, мс:$times")
@@ -969,38 +1000,65 @@ object Inventory {
         for (f in filesIn(obj)) {
             val p = parse(f)
             val lists = p.lists
-            val head = listOf("№", "Инв. номер", "Наименование", "Место", "Кол-во", "Первонач. стоимость", "Сумма", "Приоритет", "Список",
-                "Осмотрено", "Состояние", "Снимков", "Первый снимок", "Последний снимок", "Комментарий", "Папка")
+            // Чего в описи нет вовсе (стоимостей, приоритетов, места, списков), того нет и в отчёте:
+            // пустой столбец «Первонач. стоимость» и «стоимость осмотренного 0,0» читались как
+            // «стоит ноль», а блок приоритетов из одного «П—» — как поломка (автор, 13.10.2026:
+            // «стоимости может не быть, приоритетов может не быть»).
+            val hasInitial = p.items.any { it.initial != null }
+            val hasSum = p.items.any { it.sum != null }
+            val hasPriority = p.items.any { it.priority.isNotEmpty() }
+            val hasStatus = p.items.any { it.status.isNotEmpty() }
+            val hasPlace = p.items.any { it.place.isNotEmpty() }
+            val hasQty = p.items.any { it.qty.isNotEmpty() }
+            // Столбец: заголовок, ширина, есть ли он, значение строки.
+            class Col(val title: String, val width: Int, val on: Boolean, val value: (Item) -> Any?)
+            val notes = HashMap<File, String?>()  // комментарий папки — что с предметом не так (общая папка — один раз)
+            val cols = listOf(
+                Col("№", 7, true) { i -> i.number.toLongOrNull() ?: i.number },
+                Col("Инв. номер", 18, true) { i -> i.inventory },
+                Col("Наименование", 50, true) { i -> i.name },
+                Col("Место", 16, hasPlace) { i -> i.place.ifEmpty { null } },
+                Col("Кол-во", 8, hasQty) { i -> i.qty.toLongOrNull() ?: i.qty.ifEmpty { null } },
+                Col("Первонач. стоимость", 16, hasInitial) { i -> i.initial },
+                Col("Сумма", 16, hasSum) { i -> i.sum },
+                Col("Приоритет", 10, hasPriority) { i -> i.priority.toLongOrNull() ?: i.priority.ifEmpty { null } },
+                Col("Список", 18, hasStatus) { i -> i.status.ifEmpty { null } },
+                Col("Осмотрено", 11, true) { i -> if (st.earlier(i)) "Ранее" else if (st.inspected(i)) "Да" else "Нет" },
+                Col("Состояние", 13, true) { i -> if (st.broken(i)) "Нерабочее" else null },
+                Col("Снимков", 9, true) { i -> st.photosOf(i) },
+                Col("Первый снимок", 17, true) { i -> st.firstShot(i)?.let { WHEN.format(it) } },
+                Col("Последний снимок", 17, true) { i -> st.lastShot(i)?.let { WHEN.format(it) } },
+                Col("Комментарий", 40, true) { i -> st.folderOf(i)?.let { notes.getOrPut(it) { Store.note(it) } } },
+                Col("Папка", 40, true) { i -> st.folderOf(i)?.let { Store.relative(it) } },
+            ).filter { it.on }
+            val head = cols.map { it.title }
             val sheets = mutableListOf<Xlsx.Out>()
-            val total = listOf("Всего", "Осмотрено", "Не осмотрено", "Осмотрено, %", "Первонач. стоимость осмотренного", "Нерабочих")
+            val total = listOfNotNull("Всего", "Осмотрено", "Не осмотрено", "Осмотрено, %",
+                "Первонач. стоимость осмотренного".takeIf { hasInitial }, "Нерабочих")
             fun line(name: String, items: List<Item>): List<Any?> {
                 val done = items.filter(st::inspected)
                 return listOf(name, items.size, done.size, items.size - done.size,
-                    if (items.isEmpty()) 0 else kotlin.math.round(done.size * 1000.0 / items.size) / 10.0, done.sumOf { it.initial ?: 0.0 },
-                    items.count(st::broken))
+                    if (items.isEmpty()) 0 else kotlin.math.round(done.size * 1000.0 / items.size) / 10.0) +
+                    (if (hasInitial) listOf(done.sumOf { it.initial ?: 0.0 }) else emptyList()) + listOf(items.count(st::broken))
             }
             val summary = mutableListOf<List<Any?>>(listOf("Лист") + total)
-            val notes = HashMap<File, String?>()  // комментарий папки — что с предметом не так (общая папка — один раз)
             for (l in lists) {
                 val items = p.items.filter { it.list == l }
                 summary += line(l, items)
-                val rows = listOf<List<Any?>>(head) + items.map { i ->
-                    listOf(i.number.toLongOrNull() ?: i.number, i.inventory, i.name, i.place.ifEmpty { null }, i.qty.toLongOrNull() ?: i.qty.ifEmpty { null },
-                        i.initial, i.sum, i.priority.toLongOrNull() ?: i.priority.ifEmpty { null }, i.status.ifEmpty { null },
-                        if (st.earlier(i)) "Ранее" else if (st.inspected(i)) "Да" else "Нет", if (st.broken(i)) "Нерабочее" else null, st.photosOf(i), st.firstShot(i)?.let { WHEN.format(it) }, st.lastShot(i)?.let { WHEN.format(it) },
-                        st.folderOf(i)?.let { notes.getOrPut(it) { Store.note(it) } }, st.folderOf(i)?.let { Store.relative(it) })
-                }
-                sheets += Xlsx.Out(l, rows, listOf(7, 18, 50, 16, 8, 16, 16, 10, 18, 11, 13, 9, 17, 17, 40, 40)) { r ->
+                val rows = listOf<List<Any?>>(head) + items.map { i -> cols.map { it.value(i) } }
+                sheets += Xlsx.Out(l, rows, cols.map { it.width }) { r ->
                     // Нерабочий — красным (важнее, чем «осмотрен»), осмотренный — зелёным.
                     when { r == 0 -> Xlsx.PLAIN; st.broken(items[r - 1]) -> Xlsx.RED; st.inspected(items[r - 1]) -> Xlsx.GREEN; else -> Xlsx.PLAIN }
                 }
             }
             if (lists.size > 1) summary += line("Все листы", p.items)
-            // По приоритетам — по всем спискам описи.
-            summary += listOf<Any?>()
-            summary += listOf("Приоритет") + total
-            p.items.groupBy { it.priority.ifEmpty { "—" } }.entries.sortedWith(compareBy({ it.key.toIntOrNull() ?: Int.MAX_VALUE }, { it.key }))
-                .forEach { (pr, items) -> summary += line("П$pr", items) }
+            // По приоритетам — по всем спискам описи; приоритетов нет — и блока нет.
+            if (hasPriority) {
+                summary += listOf<Any?>()
+                summary += listOf("Приоритет") + total
+                p.items.groupBy { it.priority.ifEmpty { "—" } }.entries.sortedWith(compareBy({ it.key.toIntOrNull() ?: Int.MAX_VALUE }, { it.key }))
+                    .forEach { (pr, items) -> summary += line("П$pr", items) }
+            }
             // По дням — выезды: сколько предметов впервые снято в тот день и сколько всего к его концу.
             val byDay = p.items.mapNotNull { i -> st.firstShot(i)?.let { DAY.format(it) to it } }.groupBy({ it.first }, { it.second })
                 .entries.sortedBy { it.value.min() }
@@ -1009,8 +1067,11 @@ object Inventory {
                 byDay.map { (d, v) -> sum += v.size; listOf(d, v.size, sum) }
             // Нет в описи — папки со снимками, которых в описи нет (излишки, неизвестное).
             val keys = p.items.map { key(id(it)) }.toSet()
-            val extra = obj.walkTopDown().onEnter { it == obj || !it.name.startsWith(".") }.filter { it.isDirectory && it != obj }
-                .filter { d -> (members(d).ifEmpty { listOf(invOfName(d.name)) }).none { key(it) in keys } && (d.listFiles()?.any(Store::isPhoto) == true) }
+            // Папка внутри папки предмета («до ремонта») — часть предмета, её снимки уже у него.
+            fun ofItem(d: File) = (members(d).ifEmpty { listOf(invOfName(d.name)) }).any { key(it) in keys }
+            val extra = obj.walkTopDown().onEnter { it == obj || !it.name.startsWith(".") && !(it != obj && ofItem(it)) }
+                .filter { it.isDirectory && it != obj }
+                .filter { d -> !ofItem(d) && (d.listFiles()?.any(Store::isPhoto) == true) }
                 .map { d -> listOf<Any?>(d.relativeTo(obj).path, d.listFiles()?.count(Store::isPhoto) ?: 0, Store.note(d)) }.toList()
             // Журнал: кто и что менял; подпись каждой строки проверена — до первой нарушенной.
             val log = Journal.entries(obj)

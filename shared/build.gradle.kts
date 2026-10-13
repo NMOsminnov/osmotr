@@ -51,6 +51,8 @@ kotlin {
 tasks.withType<Test>().configureEach {
     // Набор кривых описей — тот же, что у Android-тестов.
     systemProperty("templates", rootProject.file("shared/src/jvmTest/resources/templates").absolutePath)
+    // Куда сложить образец отчёта (ReportSampleTest); пусто — образец не собирается.
+    systemProperty("reportSample", providers.environmentVariable("OSMOTR_REPORT_SAMPLE").orElse("").get())
 }
 
 // Шрифт и прочие ресурсы общего кода — класс Res в своём пакете, наружу не виден.

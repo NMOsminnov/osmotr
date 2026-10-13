@@ -185,4 +185,26 @@ class TemplatesTest {
         assertTrue(Inventory.headerScore(Inventory.Field.INITIAL, "Первоночальная стоимость") >= 8)
         assertTrue(Inventory.headerScore(Inventory.Field.QUANTITY, "Количетсво") >= 8)
     }
+
+    /** Всё трудное сразу, без стоимостей и приоритетов (tools/make_templates.py, hardest). */
+    @Test fun t23_самая_сложная_без_цен_и_приоритетов() {
+        val its = Inventory.distinctIds(items("23-hardest.xlsx"))
+        assertEquals("сводка — не опись; два листа", listOf("Корпус 1", "Склад"), its.map { it.list }.distinct())
+        assertEquals(24, its.size)
+        assertTrue("ни цен, ни приоритетов", its.all { it.initial == null && it.sum == null && it.priority.isEmpty() })
+        // «Н/п» — номер: нумерация заново в каждом разделе сохраняется.
+        assertEquals(listOf("1", "2", "3", "4", "5", "6"), its.take(6).map { it.number }); assertEquals("1", its[6].number)
+        // Разделы — места, «Коридор, 1 этаж» тоже; место из столбца важнее раздела.
+        assertEquals("коридор", its.first { it.inventory == "Н179" }.place)
+        // Инвентарник в наименовании при пустой ячейке столбца.
+        val монитор = its.first { it.name.startsWith("Монитор") }
+        assertEquals("013/4501", монитор.inventory); assertEquals("Монитор Samsung 24", монитор.name)
+        // Латиница в инвентарнике — как есть; совпадение по ключу — как с кириллицей.
+        assertEquals(Inventory.key("ОС-000104"), Inventory.key(its.first { it.name.startsWith("Стол") }.inventory))
+        // Два «№6» без инвентарника — разные предметы.
+        val шестые = its.filter { it.inventory.isEmpty() && it.number == "6" }
+        assertEquals(2, шестые.size); assertEquals(2, шестые.map(Inventory::id).toSet().size)
+        assertEquals("№6", Inventory.id(шестые[0]))
+        assertEquals("3", its.first { it.name.startsWith("Перегородка") }.qty)
+    }
 }
