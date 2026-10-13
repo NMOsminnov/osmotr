@@ -237,9 +237,18 @@ object Inventory {
         return v.singleOrNull()?.takeIf { s -> s.any(Char::isLetter) && !isTotal(s) }
     }
 
+    /**
+     * Заглушка вместо инвентарника: «б/н», «без номера», прочерк, «нет», «0», «?», «#N/A».
+     * Предмет без инвентарника, а не инвентарник «б/н» — иначе все «б/н» описи стали бы одним
+     * предметом. И при подборе столбцов заглушки не считаются: когда их треть, столбец
+     * инвентарников отвергался целиком, и у всех предметов пропадали номера (13.10.2026).
+     */
+    private val PLACEHOLDER = Regex("""(?iu)^\s*(б\s*[/\\.]?\s*н\.?|б/№|без\s*(инв\.?\s*)?(номера|№|н)|нет|отсутств\p{L}*|не\s*присвоен\p{L}*|[-–—_.?xх*]+|0+|n\s*/?\s*a|#\S*)\s*$""")
+    fun placeholder(s: String) = PLACEHOLDER.matches(s)
+
     /** Насколько значения столбца похожи на поле. */
     private fun dataScore(f: Field, values: List<String>): Int {
-        val v = values.map { it.trim() }.filter { it.isNotEmpty() }
+        val v = values.map { it.trim() }.filter { it.isNotEmpty() && !(f == Field.INVENTORY && placeholder(it)) }
         if (v.isEmpty()) return -6
         if (v.size == 1) return 0  // одно значение (лист из одного предмета) — не довод ни за, ни против
         val nums = v.mapNotNull(::number)
@@ -343,7 +352,12 @@ object Inventory {
                 val d = dataScores.getValue(f).getValue(c)
                 if (hr != null) {
                     val h = headerScore(f, headers.getOrElse(c) { "" })
-                    if (h <= 0) Int.MIN_VALUE else h + d
+                    // Ясная шапка («Инв. номер», «Наименование», «№ п/п») решает сама: данные
+                    // столбца выбирают из равных, но не отменяют его. Сбои — заглушки, ошибки
+                    // Excel, мусор — разбираются по ячейкам и задевают только свою ячейку
+                    // (автор, 13.10.2026: «Обрабатываем не столбец целиком, а по ячейкам,
+                    // чтобы сбои не влияли»).
+                    if (h <= 0) Int.MIN_VALUE else if (h >= 10) h + maxOf(d, 0) else h + d
                 } else d + 5  // шапки нет — по одним данным
             }.filterValues { it >= 8 }
         }
@@ -424,7 +438,11 @@ object Inventory {
             // Раздел объединён на всю ширину — его текст и в столбце инвентарника.
             sectionOf(r)?.let { sec -> cell(r, Field.INVENTORY).let { if (it.isEmpty() || it == sec) { section(sec); continue } } }
             if (!dataRow(r, t.headers)) continue
-            var inv = cell(r, Field.INVENTORY); var name = cell(r, Field.NAME)
+            // Ячейка инвентарника проверяется сама: заглушка или текст без единой цифры («см. акт»,
+            // «уточнить», «ЗНАЧ!») — у этого предмета инвентарника нет; столбец от этого не страдает.
+            var inv = cell(r, Field.INVENTORY).let { if (placeholder(it) || it.none(Char::isDigit)) "" else it.replace('\u00A0', ' ') }
+            // Наименование: переносы строк и неразрывные пробелы — пробелом; «#N/A», «#ЗНАЧ!» — не название.
+            var name = cell(r, Field.NAME).replace(Regex("""[\s\u00A0]+"""), " ").trim().let { if (Regex("""^#\S+$""").matches(it)) "" else it }
             // Инвентарник в наименовании: столбца нет вовсе — или он есть, но в этой строке пуст, а в
             // названии явно «инв. №…» («Монитор Samsung 24 инв. № 013/4501», 13.10.2026).
             if (inv.isEmpty() && (t.invFromName || INV_MARK.containsMatchIn(name))) INV_IN_NAME.find(name)?.let { m ->
@@ -1073,6 +1091,14 @@ object Inventory {
                 .filter { it.isDirectory && it != obj }
                 .filter { d -> !ofItem(d) && (d.listFiles()?.any(Store::isPhoto) == true) }
                 .map { d -> listOf<Any?>(d.relativeTo(obj).path, d.listFiles()?.count(Store::isPhoto) ?: 0, Store.note(d)) }.toList()
+            // Один инвентарник в нескольких строках описи — один предмет (одна папка, одна отметка);
+            // сказать об этом, чтобы повтор в описи не прошёл незамеченным (13.10.2026).
+            val repeats = p.items.filter { it.inventory.isNotEmpty() }.groupBy { key(it.inventory) }.filter { it.value.size > 1 }.values
+            if (repeats.isNotEmpty()) {
+                summary += listOf<Any?>()
+                summary += listOf<Any?>("Инвентарник повторяется в описи — считается одним предметом:")
+                repeats.forEach { g -> summary += listOf<Any?>(g.first().inventory, g.joinToString(", ") { "«${it.list}», стр. ${it.row}" }) }
+            }
             // Журнал: кто и что менял; подпись каждой строки проверена — до первой нарушенной.
             val log = Journal.entries(obj)
             val check = Journal.verifyQuick(obj)

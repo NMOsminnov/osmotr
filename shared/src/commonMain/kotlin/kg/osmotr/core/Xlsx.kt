@@ -198,7 +198,10 @@ object Xlsx {
                     }
                     val value = when (type) {
                         "s" -> shared.getOrNull(raw.toIntOrNull() ?: -1).orEmpty()
-                        "inlineStr", "str", "e" -> raw
+                        "inlineStr", "str" -> raw
+                        // Ошибка формулы (#N/A, #REF!, #ЗНАЧ!) — не данные: пустая ячейка, а не
+                        // «наименование #N/A» и не инвентарник (13.10.2026).
+                        "e" -> ""
                         "b" -> if (raw == "1") "ИСТИНА" else "ЛОЖЬ"
                         else -> plain(raw)
                     }
