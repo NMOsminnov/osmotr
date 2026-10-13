@@ -890,7 +890,7 @@ object Inventory {
         if (on) lines += take.map(::id) else lines.removeAll { key(it) in keys }
         val f = File(obj, EARLIER)
         if (lines.isEmpty()) f.delete() else Store.writeDurably(f, (lines.joinToString("\n") + "\n").encodeToByteArray())
-        Journal.add(obj, if (on) "Осмотрено ранее (вручную)" else "Снята отметка «ранее»", take.joinToString(", ") { id(it) }, f, gone = lines.isEmpty())
+        Journal.add(obj, if (on) "Отмечено осмотренным" else "Снята отметка «осмотрено»", take.joinToString(", ") { id(it) }, f, gone = lines.isEmpty())
         Store.changed()
         return take.size
     }
@@ -1060,7 +1060,7 @@ object Inventory {
                 Col("Сумма", 16, hasSum) { i -> i.sum },
                 Col("Приоритет", 10, hasPriority) { i -> i.priority.toLongOrNull() ?: i.priority.ifEmpty { null } },
                 Col("Список", 18, hasStatus) { i -> i.status.ifEmpty { null } },
-                Col("Осмотрено", 11, true) { i -> if (st.earlier(i)) "Ранее" else if (st.inspected(i)) "Да" else "Нет" },
+                Col("Осмотрено", 11, true) { i -> if (st.inspected(i)) "Да" else "Нет" },
                 Col("Состояние", 13, true) { i -> if (st.broken(i)) "Нерабочее" else null },
                 Col("Снимков", 9, true) { i -> st.photosOf(i) },
                 Col("Первый снимок", 17, true) { i -> st.firstShot(i)?.let { WHEN.format(it) } },

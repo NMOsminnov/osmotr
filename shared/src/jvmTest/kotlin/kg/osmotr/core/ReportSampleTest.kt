@@ -106,7 +106,7 @@ class ReportSampleTest {
         val корпус = книга.first { it.name == "Корпус 1" }.rows
         val h = корпус[0]
         fun строка(inv: String) = корпус.first { it.getOrNull(h.indexOf("Инв. номер")) == inv }
-        assertEquals("Ранее", строка("INV-2024-0001")[h.indexOf("Осмотрено")])
+        assertEquals("Да", строка("INV-2024-0001")[h.indexOf("Осмотрено")])
         assertEquals("Да", строка("ОС-000102")[h.indexOf("Осмотрено")])  // в общей папке
         assertEquals("Нерабочее", строка("777/1002")[h.indexOf("Состояние")])
         assertEquals("Нет", строка("Н180")[h.indexOf("Осмотрено")])

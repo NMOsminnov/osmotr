@@ -61,7 +61,7 @@ class EarlierImportTest {
         assertTrue("журнал цел", Journal.verify(obj).ok)
     }
 
-    @Test fun в_отчёте_ранее_а_снятое_да() {
+    @Test fun в_отчёте_осмотрено_да() {
         Inventory.importEarlier(obj, ихТаблица(), 1, "их.xlsx")
         val проектор = items().first { it.inventory == "555/3" }
         File(Inventory.openFolder(obj, проектор), "a.jpg").writeBytes(ByteArray(10))
@@ -70,7 +70,7 @@ class EarlierImportTest {
         val list = book.first { it.name == "Опись" }.rows
         val head = list[0]
         fun осмотрено(inv: String) = list.first { it.getOrNull(head.indexOf("Инв. номер")) == inv }[head.indexOf("Осмотрено")]
-        assertEquals("Ранее", осмотрено("555/1"))
+        assertEquals("Да", осмотрено("555/1"))
         assertEquals("Да", осмотрено("555/3"))
     }
 

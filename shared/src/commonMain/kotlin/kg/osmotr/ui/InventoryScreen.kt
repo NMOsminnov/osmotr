@@ -299,15 +299,19 @@ fun InventoryScreen(obj: File, into: File? = null, initialQuery: String? = null,
                 navigationIcon = { IconButton(onClick = { selected.clear() }) { Icon(Icons.Default.Close, "Снять выбор") } },
                 title = { Text("Отмечено: ${selected.size}") },
                 actions = {
-                    // Отмечены «осмотрено ранее» по ошибке — снять разом (автор: «как отметить невыполненным?»).
-                    val ранее = selected.filter { st?.earlier(it) == true }
-                    if (ранее.isNotEmpty()) TextButton(onClick = {
-                        val items = ранее.toList(); selected.clear()
+                    // Отметка «осмотрено» без снимков — поставить разом и снять разом (автор: «как отметить
+                    // невыполненным?», «отметить как осмотренное — нужна»).
+                    fun mark(items: List<Inventory.Item>, on: Boolean) {
+                        selected.clear()
                         scope.launch {
-                            val n = withContext(Dispatchers.IO) { Inventory.setEarlier(obj, items, false).also { Inventory.refreshReportSoon(obj) } }
-                            host.toast("Снята отметка «ранее»: $n"); reparse++
+                            val n = withContext(Dispatchers.IO) { Inventory.setEarlier(obj, items, on).also { Inventory.refreshReportSoon(obj) } }
+                            host.toast((if (on) "Отмечено осмотренными: " else "Снята отметка «осмотрено»: ") + n); reparse++
                         }
-                    }) { Text("Снять «ранее» (${ранее.size})") }
+                    }
+                    val нет = selected.filter { st?.inspected(it) == false }
+                    val снять = selected.filter { st?.earlier(it) == true }
+                    if (нет.isNotEmpty()) TextButton(onClick = { mark(нет.toList(), true) }) { Text("Осмотрено (${нет.size})") }
+                    if (снять.isNotEmpty()) TextButton(onClick = { mark(снять.toList(), false) }) { Text("Снять (${снять.size})") }
                 },
             ) else TopAppBar(
                 navigationIcon = { IconButton(onClick = close) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Назад") } },
@@ -623,9 +627,9 @@ fun ParseProgress(dir: File?, modifier: Modifier = Modifier, compact: Boolean = 
 
 
 
-/** Осмотрено ранее — отметка из импорта, без снимков в приложении. */
+/** Осмотрено без снимков — отметка импортом или вручную. */
 @Composable
-fun EarlierLabel() = Text("ранее", Modifier.clip(RoundedCornerShape(6.dp)).background(DONE_GREEN.copy(alpha = 0.18f)).padding(horizontal = 6.dp),
+fun EarlierLabel() = Text("осмотрено", Modifier.clip(RoundedCornerShape(6.dp)).background(DONE_GREEN.copy(alpha = 0.18f)).padding(horizontal = 6.dp),
     style = MaterialTheme.typography.labelSmall, color = DONE_GREEN, maxLines = 1)
 
 @Composable
