@@ -175,6 +175,8 @@ fun InventoryScreen(obj: File, into: File? = null, initialQuery: String? = null,
     // папки добавить, но и в корень описи… через 3 точки»).
     var editingNote by remember { mutableStateOf(false) }
     var recording by remember { mutableStateOf(false) }
+    // Импорт уже отсмотренного: имя файла и его листы (EarlierImport.kt).
+    var earlier by remember { mutableStateOf<Pair<String, List<kg.osmotr.core.Xlsx.Sheet>>?>(null) }
     val note by produceState<String?>(null, obj, version) { value = withContext(Dispatchers.IO) { Store.note(obj) } }
     val voices by produceState(emptyList<File>(), obj, version) { value = withContext(Dispatchers.IO) { Store.voiceNotes(obj) } }
     val people by produceState(emptyList<Store.Contact>(), obj, version) { value = withContext(Dispatchers.IO) { Store.contacts(obj) } }
@@ -217,6 +219,15 @@ fun InventoryScreen(obj: File, into: File? = null, initialQuery: String? = null,
         }
     }
     BackHandler(enabled = target != null) { finish() }
+
+    fun loadEarlier() = host.pickBooks(false) { got ->
+        val book = got.firstOrNull() ?: return@pickBooks
+        scope.launch {
+            val sheets = withContext(Dispatchers.IO) { runCatching { kg.osmotr.core.Xlsx.sheets(book.bytes) }.getOrDefault(emptyList()) }
+            if (sheets.isEmpty()) host.toast("${book.name}: не книга Excel (.xlsx) или повреждена", long = true)
+            else earlier = book.name to sheets
+        }
+    }
 
     fun load() = host.pickBooks(false) { got ->
         val book = got.firstOrNull() ?: return@pickBooks
@@ -303,6 +314,8 @@ fun InventoryScreen(obj: File, into: File? = null, initialQuery: String? = null,
                                 leadingIcon = { Icon(AppIcons.Notes, null) }, onClick = { menu = false; editingNote = true })
                             DropdownMenuItem({ Text("Диктофон") }, leadingIcon = { Icon(AppIcons.Mic, null) }, onClick = { menu = false; recording = true })
                             DropdownMenuItem({ Text("Контакты") }, leadingIcon = { Icon(Icons.Default.Person, null) }, onClick = { menu = false; contacts(obj) })
+                            if (!d?.parsed.isNullOrEmpty()) DropdownMenuItem({ Text("Импорт осмотренного") },
+                                leadingIcon = { Icon(AppIcons.Checklist, null) }, onClick = { menu = false; loadEarlier() })
                             DropdownMenuItem({ Text(if (d?.parsed.isNullOrEmpty()) "Загрузить опись" else "Заменить файл описи") },
                                 leadingIcon = { Icon(AppIcons.UploadFile, null) }, onClick = { menu = false; load() })
                         }
@@ -406,6 +419,9 @@ fun InventoryScreen(obj: File, into: File? = null, initialQuery: String? = null,
                                     else if (n > 0) {
                                         Icon(Icons.Default.CheckCircle, "Осмотрено", tint = DONE_GREEN, modifier = Modifier.size(24.dp))
                                         Text("$n", Modifier.align(Alignment.BottomEnd), style = MaterialTheme.typography.labelSmall, color = DONE_GREEN)
+                                    } else if (st?.earlier(i) == true) {
+                                        // Осмотрено раньше, по импорту отметок: снимков в приложении нет — бледнее.
+                                        Icon(Icons.Default.CheckCircle, "Осмотрено ранее", tint = DONE_GREEN.copy(alpha = 0.45f), modifier = Modifier.size(24.dp))
                                     } else Box(Modifier.size(7.dp).clip(androidx.compose.foundation.shape.CircleShape)
                                         .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f)))
                                 }
@@ -417,6 +433,7 @@ fun InventoryScreen(obj: File, into: File? = null, initialQuery: String? = null,
                                             .background(MaterialTheme.colorScheme.secondary.copy(alpha = 0.2f)).padding(horizontal = 6.dp),
                                             style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.secondary)
                                         if (st?.broken(i) == true) BrokenLabel()
+                                        if (st?.earlier(i) == true) EarlierLabel()
                                     }
                                     Text(i.name + (i.qty.toIntOrNull()?.takeIf { it > 1 }?.let { " · $it шт" } ?: ""),
                                         style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
@@ -452,6 +469,13 @@ fun InventoryScreen(obj: File, into: File? = null, initialQuery: String? = null,
 
     if (exporting) ExportDialog(obj, onClose = { exporting = false })
     if (recording) VoiceRecorderDialog(obj, onClose = { recording = false })
+    earlier?.let { (name, sheets) ->
+        EarlierImportScreen(obj, name, sheets, onClose = { earlier = null }, onDone = { n ->
+            earlier = null
+            host.toast(if (n > 0) "Отмечено осмотренными: $n" else "Новых отметок нет")
+            reparse++
+        })
+    }
     if (editingNote) NoteDialog(note.orEmpty(), onDone = { editingNote = false; Store.setNote(obj, it) }, onCancel = { editingNote = false })
     newFolder?.let { initial ->
         NameDialog("Название папки", initial = initial, confirm = "Создать", onDone = { name ->
@@ -587,6 +611,11 @@ fun ParseProgress(dir: File?, modifier: Modifier = Modifier, compact: Boolean = 
 
 
 
+
+/** Осмотрено ранее — отметка из импорта, без снимков в приложении. */
+@Composable
+fun EarlierLabel() = Text("ранее", Modifier.clip(RoundedCornerShape(6.dp)).background(DONE_GREEN.copy(alpha = 0.18f)).padding(horizontal = 6.dp),
+    style = MaterialTheme.typography.labelSmall, color = DONE_GREEN, maxLines = 1)
 
 @Composable
 fun BrokenLabel() = Text("нерабочее", Modifier.clip(RoundedCornerShape(6.dp)).background(BROKEN_RED.copy(alpha = 0.2f)).padding(horizontal = 6.dp),

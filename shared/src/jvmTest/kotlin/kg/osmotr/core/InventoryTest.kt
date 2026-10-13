@@ -115,7 +115,7 @@ class InventoryTest {
         assertEquals(listOf("Опись", "Вынесено"), p.lists)
         val scanner = p.items.first { it.inventory == "М-205" }
         val dir = Inventory.openFolder(obj, scanner)
-        assertEquals("4. М-205", dir.name)
+        assertEquals("4. М-205 — Сканер штрих-кода", dir.name)
         assertEquals(listOf("М-205"), Inventory.members(dir))
         assertEquals("та же папка второй раз", dir, Inventory.openFolder(obj, scanner))
         assertEquals(false, Inventory.status(obj).inspected(scanner))
@@ -135,7 +135,7 @@ class InventoryTest {
         // В папке первого — подсказка: ещё два таких же в описи, не осмотрен из них один (третий).
         assertEquals(listOf("777/1003"), Inventory.similar(obj, listOf(units[0]), Inventory.status(obj)).map { it.inventory })
         val group = Inventory.group(obj, units)
-        assertEquals("1. 777∕1001 +2 шт", group.name)
+        assertEquals("1. 777∕1001 — Серверный юнит Dell R640 +2 шт", group.name)
         assertEquals(listOf("777/1001", "777/1002", "777/1003"), Inventory.members(group))
         assertEquals("снимки второго переехали", 2, Store.photoTree(group).size)
         assertTrue("пустая папка второго убрана", !second.exists())
@@ -143,7 +143,7 @@ class InventoryTest {
         assertTrue(units.all { st.inspected(it) })
         // Ошиблись — убрать один из папки.
         val back = Inventory.removeFrom(group, units[2])
-        assertEquals("1. 777∕1001 +1 шт", back.name)
+        assertEquals("1. 777∕1001 — Серверный юнит Dell R640 +1 шт", back.name)
     }
 
     @Test fun отчёт_осмотрено_не_осмотрено_в_excel() {
@@ -162,7 +162,7 @@ class InventoryTest {
         assertEquals(listOf("П5", "1", "1"), summary.first { it.firstOrNull() == "П5" }.take(3))
         val head = sheets[1].rows[0]
         val row = sheets[1].rows.first { it.getOrNull(1) == "М-205" }
-        assertEquals("Да", row[head.indexOf("Осмотрено")]); assertEquals("1", row[head.indexOf("Снимков")]); assertEquals("Объект/4. М-205", row[head.indexOf("Папка")])
+        assertEquals("Да", row[head.indexOf("Осмотрено")]); assertEquals("1", row[head.indexOf("Снимков")]); assertEquals("Объект/4. М-205 — Сканер штрих-кода", row[head.indexOf("Папка")])
         assertEquals("Нет", sheets[1].rows.first { it.getOrNull(1) == "777/1001" }[head.indexOf("Осмотрено")])
         // Отчёт — не опись: в описях объекта его нет.
         assertEquals(1, Inventory.filesIn(obj).size)
@@ -213,10 +213,15 @@ class InventoryTest {
 
     @Test fun имя_папки_номер_и_инвентарник_или_название() {
         fun item(n: String, inv: String, name: String) = Inventory.Item("Опись", n, inv, name, null, null, "", "", 1)
-        assertEquals("13. 1562∕65", Inventory.folderName(item("13", "1562/65", "Монитор")))
-        assertEquals("без инвентарника — просто номер", "13", Inventory.folderName(item("13", "", "ИВЛ")))
-        assertEquals("13. 1562∕65 +19 шт", Inventory.folderName(item("13", "1562/65", "Монитор"), 20))
-        assertEquals("13 +1 шт", Inventory.folderName(item("13", "", "ИВЛ"), 2))
+        // «Номер. Инвентарник — Название», тире длинное (автор, 13.10.2026).
+        assertEquals("13. 1562∕65 — Монитор", Inventory.folderName(item("13", "1562/65", "Монитор")))
+        assertEquals("без инвентарника — номер и название", "13 — ИВЛ", Inventory.folderName(item("13", "", "ИВЛ")))
+        assertEquals("13. 1562∕65 — Монитор +19 шт", Inventory.folderName(item("13", "1562/65", "Монитор"), 20))
+        assertEquals("13 — ИВЛ +1 шт", Inventory.folderName(item("13", "", "ИВЛ"), 2))
+        // Дробь в названии — тоже U+2215; длинное название — с многоточием, имя в пределах 255 байт.
+        assertEquals("7. 55 — Стол 120∕60", Inventory.folderName(item("7", "55", "Стол 120/60")))
+        val long = Inventory.folderName(item("7", "0101-345АБ", "Аппарат искусственной вентиляции лёгких с увлажнителем и монитором"), 120)
+        assertTrue(long, long.contains("…") && long.encodeToByteArray().size < 255)
     }
 
     @Test fun прежние_папки_переименовываются_по_новому_правилу() {
@@ -226,10 +231,21 @@ class InventoryTest {
         val old = File(obj, "777 1001 (3 шт)"); assertTrue(group.renameTo(old))  // как называли прежние версии
         photo(old, "x.jpg")
         Inventory.migrate()
-        val now = File(obj, "1. 777∕1001 +2 шт")
+        val now = File(obj, "1. 777∕1001 — Серверный юнит Dell R640 +2 шт")
         assertTrue("переименована", now.isDirectory && !old.exists())
         assertTrue("снимки с ней", File(now, "x.jpg").isFile)
         assertTrue(Inventory.status(obj).inspected(units[2]))
+    }
+
+    @Test fun папки_прежнего_вида_номер_инвентарник_получают_название() {
+        val obj = objectWithInventory()
+        val scanner = Inventory.parse(Inventory.fileIn(obj)!!).items.first { it.inventory == "М-205" }
+        val dir = Inventory.openFolder(obj, scanner)
+        val old = File(obj, "4. М-205"); assertTrue(dir.renameTo(old))  // как называла версия 2.9
+        photo(old, "a.jpg")
+        Inventory.migrate()
+        assertTrue(File(obj, "4. М-205 — Сканер штрих-кода").isDirectory && !old.exists())
+        assertTrue(Inventory.status(obj).inspected(scanner))
     }
 
     @Test fun отчёт_комментарий_по_дням_нет_в_описи_и_выгрузка_нового() {

@@ -6,7 +6,12 @@ package kg.osmotr.core
  * диапазон (шапка в два этажа, разделы на всю ширину); ячейки без адреса — по порядку.
  */
 object Xlsx {
-    class Sheet(val name: String, val rows: List<List<String>>)
+    /**
+     * Лист: строки по порядку. [wide] — номера строк (с нуля), где ячейки объединены по ширине —
+     * на несколько столбцов: в отметках «что осмотрено» это заголовки разделов, их пропускают
+     * (автор, 13.10.2026: «Строки, которые объединены в ширину, игнорируем»).
+     */
+    class Sheet(val name: String, val rows: List<List<String>>, val wide: Set<Int> = emptySet())
 
     /** Все листы книги по порядку. Не .xlsx или повреждена — пусто. [progress] — доля и имя листа. */
     fun sheets(book: ByteArray, progress: ((Float, String) -> Unit)? = null, rowLimit: Int = Int.MAX_VALUE): List<Sheet> {
@@ -30,10 +35,10 @@ object Xlsx {
         return parts.mapIndexedNotNull { k, (name, path) ->
             val bytes = files[path] ?: return@mapIndexedNotNull null
             val base = done
-            val rows = cells(bytes.decodeToString(), shared, { p -> progress?.invoke((base + p * sizes[k]) / total, name) }, rowLimit)
+            val (rows, wide) = cells(bytes.decodeToString(), shared, { p -> progress?.invoke((base + p * sizes[k]) / total, name) }, rowLimit)
             done += sizes[k]
             progress?.invoke(done / total, name)
-            Sheet(name, rows)
+            Sheet(name, rows, wide)
         }
     }
 
@@ -153,7 +158,7 @@ object Xlsx {
     private fun colIndex(letters: String): Int =
         if (letters.isEmpty()) -1 else letters.uppercase().fold(0) { a, ch -> a * 26 + (ch - 'A' + 1) } - 1
 
-    private fun cells(xml: String, shared: List<String>, progress: (Float) -> Unit, rowLimit: Int): List<List<String>> {
+    private fun cells(xml: String, shared: List<String>, progress: (Float) -> Unit, rowLimit: Int): Pair<List<List<String>>, Set<Int>> {
         val rows = HashMap<Int, HashMap<Int, String>>()
         val merges = mutableListOf<String>()
         var row = 0; var col = -1
@@ -207,16 +212,18 @@ object Xlsx {
                 else -> i = tagEnd + 1
             }
         }
+        val wide = HashSet<Int>()
         for (m in merges) {
             val parts = m.split(':'); if (parts.size != 2) continue
             fun at(r: String) = (r.dropWhile { it.isLetter() }.toIntOrNull() ?: 0) to colIndex(r.takeWhile { it.isLetter() })
             val (r1, c1) = at(parts[0]); val (r2, c2) = at(parts[1])
+            if (c2 > c1) for (r in r1..r2) if (r >= 1) wide += r - 1
             val v = rows[r1]?.get(c1) ?: continue
             if ((r2 - r1 + 1).toLong() * (c2 - c1 + 1) > 5000) continue
             for (r in r1..r2) for (c in c1..c2) rows.getOrPut(r) { HashMap() }.getOrPut(c) { v }
         }
-        val last = rows.keys.maxOrNull() ?: return emptyList()
-        return (1..last).map { r -> rows[r]?.let { m -> List((m.keys.maxOrNull() ?: -1) + 1) { m[it].orEmpty() } } ?: emptyList() }
+        val last = rows.keys.maxOrNull() ?: return emptyList<List<String>>() to emptySet()
+        return (1..last).map { r -> rows[r]?.let { m -> List((m.keys.maxOrNull() ?: -1) + 1) { m[it].orEmpty() } } ?: emptyList() } to wide
     }
 
     // ---------- Запись ----------

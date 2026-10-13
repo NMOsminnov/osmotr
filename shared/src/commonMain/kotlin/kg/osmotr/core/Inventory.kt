@@ -437,9 +437,19 @@ object Inventory {
      * Имя папки предмета: «№ в описи. инвентарник» — «13. 1562∕65»; нет инвентарника — просто
      * номер «13»; несколько предметов — «… +2 шт». «/» в именах папок запрещён — похожая «∕».
      */
+    /**
+     * Имя папки предмета — «Номер. Инвентарник — Название» (автор, 13.10.2026: «Формат выгрузки —
+     * Номер. Инвентарник — (длинное тире) Название»; везде — на телефоне, по USB и в архиве).
+     * Без инвентарника — «Номер — Название». Дробь — U+2215: обычная «/» в имени невозможна.
+     * Название — не длиннее [MAX_TITLE] с многоточием: имя целиком укладывается в предел файловых
+     * систем (255 байт, кириллица — по два).
+     */
     fun folderName(first: Item, count: Int = 1): String {
-        val base = if (first.inventory.isEmpty()) Store.cleanName(first.number)
-            else Store.cleanName(first.number + ". " + first.inventory.take(MAX_INV).replace('/', '∕').replace('\\', '∖')).trim()
+        fun safe(t: String) = t.replace('/', '∕').replace('\\', '∖')
+        val head = if (first.inventory.isEmpty()) first.number else first.number + ". " + safe(first.inventory.take(MAX_INV))
+        val name = Store.cleanName(safe(first.name))
+        val title = if (name.length > MAX_TITLE) name.take(MAX_TITLE).trimEnd() + "…" else name
+        val base = Store.cleanName(if (title.isEmpty()) head else "$head — $title")
         return base + if (count > 1) " +${count - 1} шт" else ""
     }
 
@@ -664,10 +674,16 @@ object Inventory {
     private fun folderName(invs: List<String>): String =
         (Store.cleanName(invs.first().replace('/', '∕')).take(MAX_INV).trim() + if (invs.size > 1) " +${invs.size - 1} шт" else "")
     private const val MAX_INV = 48
+    /** Название в имени папки предмета — не длиннее (см. [folderName]). */
+    private const val MAX_TITLE = 48
     /** Имя папки описи — не длиннее (оно же повторяется в именах её книг). */
     const val MAX_NAME = 60
-    /** Инвентарник из имени папки без файла состава: «13. 1562∕65 +2 шт», «777 1001 +2 шт», «777 1001 (3 шт)». Просто номер («13») — не инвентарник. */
-    private fun invOfName(name: String) = name.replace(Regex("""^\d+\.\s+"""), "").substringBefore(" (").substringBefore(" +").replace('∕', '/')
+    /**
+     * Инвентарник из имени папки без файла состава: «13. 1562∕65 — Ноутбук +2 шт», «13. 1562∕65 +2 шт»,
+     * «777 1001 (3 шт)». Просто номер («13», «13 — ИВЛ») — не инвентарник.
+     */
+    private fun invOfName(name: String) = name.replace(Regex("""^\d+\.\s+"""), "").substringBefore(" — ")
+        .substringBefore(" (").substringBefore(" +").replace('∕', '/')
 
 
     /** Ближайшая папка с описью — папка объекта (сама [dir] или выше). */
@@ -680,12 +696,15 @@ object Inventory {
      */
     class Status(val folder: Map<String, File>, val photos: Map<File, Int>,
                  val first: Map<File, Long> = emptyMap(), val last: Map<File, Long> = emptyMap(),
-                 val brokenKeys: Set<String> = emptySet()) {
+                 val brokenKeys: Set<String> = emptySet(), val earlierKeys: Set<String> = emptySet()) {
         /** Нерабочее (на списание) — отмечено в «Нерабочие.txt» описи и снято: без снимков отметка не действует. */
-        fun broken(i: Item) = inspected(i) && key(id(i)) in brokenKeys
+        fun broken(i: Item) = photosOf(i) > 0 && key(id(i)) in brokenKeys
         fun folderOf(i: Item) = folder[key(id(i))]
         fun photosOf(i: Item) = folderOf(i)?.let { photos[it] } ?: 0
-        fun inspected(i: Item) = photosOf(i) > 0
+        /** Осмотрено — снято в приложении или отмечено раньше (импорт «Осмотрено ранее.txt»). */
+        fun inspected(i: Item) = photosOf(i) > 0 || key(id(i)) in earlierKeys
+        /** Осмотрено только по прежним отметкам — снимков в приложении нет. */
+        fun earlier(i: Item) = photosOf(i) == 0 && key(id(i)) in earlierKeys
         fun firstShot(i: Item) = folderOf(i)?.let { first[it] }
         fun lastShot(i: Item) = folderOf(i)?.let { last[it] }
         /** Снят сегодня (с полуночи) — «сегодня +N» на выезде. */
@@ -709,7 +728,7 @@ object Inventory {
         }
         visit(obj)
         Folders.saveSoon()
-        return Status(folder, photos, first, last, brokenOf(obj))
+        return Status(folder, photos, first, last, brokenOf(obj), earlierOf(obj))
     }
 
     // ---------- Нерабочие ----------
@@ -733,7 +752,8 @@ object Inventory {
     fun setBroken(obj: File, items: List<Item>, on: Boolean): Int {
         val lines = brokenLines(obj).toMutableList()
         val st = if (on) status(obj) else null
-        val take = if (on) items.filter { st!!.inspected(it) } else items
+        // Только снятое в приложении: «осмотрено ранее» (импорт) снимков не даёт — отметить нельзя.
+        val take = if (on) items.filter { st!!.photosOf(it) > 0 } else items
         val keys = take.map { key(id(it)) }.toSet()
         lines.removeAll { key(it) in keys }
         if (on) lines += take.map(::id).distinctBy(::key)
@@ -742,6 +762,69 @@ object Inventory {
         if (take.isNotEmpty()) Journal.add(obj, if (on) "Нерабочее" else "Снова рабочее", take.joinToString(", ") { id(it) }, f, gone = lines.isEmpty())
         Store.changed()
         return take.size
+    }
+
+    // ---------- Осмотрено ранее ----------
+    //
+    // Что люди отсмотрели до приложения — отметками в своих таблицах (автор, 13.10.2026:
+    // «Ранее люди уже отмечали, что отсмотрели. Необходимо импортировать. Импортируем по
+    // инвентарникам. Есть инвентарник — отмечаем выполненным»). Человек открывает свою таблицу
+    // как в Excel и показывает столбец с инвентарниками; строки, объединённые по ширине, —
+    // заголовки, пропускаются. Найденное — файлом «Осмотрено ранее.txt» в папке описи, по
+    // инвентарнику на строку (виден на компьютере, уходит в архив); в отчёте — «Ранее».
+
+    const val EARLIER = "Осмотрено ранее.txt"
+
+    private fun earlierLines(obj: File): List<String> = File(obj, EARLIER).takeIf { it.isFile }
+        ?.readLines()?.map { it.trim() }?.filter { it.isNotEmpty() }.orEmpty()
+
+    fun earlierOf(obj: File): Set<String> = earlierLines(obj).map(::key).toSet()
+
+    /**
+     * Что даст импорт столбца [column] листа [sheet]: какие предметы описи нашлись, сколько из
+     * них уже осмотрено, какие значения не нашлись в описи, сколько строк-заголовков пропущено.
+     */
+    class Earlier(val found: List<Item>, val already: Int, val unknown: List<String>, val skipped: Int, val rows: Int) {
+        val fresh get() = found.size - already
+    }
+
+    fun previewEarlier(obj: File, sheet: Xlsx.Sheet, column: Int, st: Status = status(obj)): Earlier {
+        val byKey = HashMap<String, MutableList<Item>>()
+        for (i in filesIn(obj).flatMap { parse(it).items }) {
+            byKey.getOrPut(key(id(i))) { mutableListOf() } += i
+            if (i.inventory.isNotEmpty()) byKey.getOrPut(key(i.inventory)) { mutableListOf() }.let { if (i !in it) it += i }
+        }
+        val found = LinkedHashMap<String, Item>()
+        val unknown = mutableListOf<String>()
+        var skipped = 0; var rows = 0
+        sheet.rows.forEachIndexed { r, row ->
+            if (r in sheet.wide) { skipped++; return@forEachIndexed }
+            val cell = row.getOrNull(column)?.trim().orEmpty()
+            if (cell.isEmpty()) return@forEachIndexed
+            rows++
+            // Ячейка целиком, иначе — по словам: «1562/65 (кабинет 3)», «ИНВ 1001; 1002».
+            val hits = (listOf(cell) + cell.split(' ', ';', ',', '\n', '\t').map { it.trim() }.filter { it.length >= 2 })
+                .map(::key).distinct().flatMap { byKey[it].orEmpty() }
+            if (hits.isEmpty()) unknown += cell else hits.forEach { found.getOrPut(key(id(it))) { it } }
+        }
+        val items = found.values.toList()
+        return Earlier(items, items.count(st::inspected), unknown, skipped, rows)
+    }
+
+    /** Отметить осмотренным ранее всё, что нашлось в столбце (см. [previewEarlier]); [source] — откуда (имя файла). */
+    fun importEarlier(obj: File, sheet: Xlsx.Sheet, column: Int, source: String): Earlier {
+        val p = previewEarlier(obj, sheet, column)
+        val lines = earlierLines(obj).toMutableList()
+        val have = lines.map(::key).toSet()
+        val add = p.found.map(::id).filter { key(it) !in have }.distinctBy(::key)
+        if (add.isNotEmpty()) {
+            lines += add
+            val f = File(obj, EARLIER)
+            Store.writeDurably(f, (lines.joinToString("\n") + "\n").encodeToByteArray())
+            Journal.add(obj, "Осмотрено ранее", "$source, «${sheet.name}»: ${add.size} из ${p.rows} строк", f)
+            Store.changed()
+        }
+        return p
     }
 
     // ---------- Выгрузки ----------
@@ -904,7 +987,7 @@ object Inventory {
                 val rows = listOf<List<Any?>>(head) + items.map { i ->
                     listOf(i.number.toLongOrNull() ?: i.number, i.inventory, i.name, i.place.ifEmpty { null }, i.qty.toLongOrNull() ?: i.qty.ifEmpty { null },
                         i.initial, i.sum, i.priority.toLongOrNull() ?: i.priority.ifEmpty { null }, i.status.ifEmpty { null },
-                        if (st.inspected(i)) "Да" else "Нет", if (st.broken(i)) "Нерабочее" else null, st.photosOf(i), st.firstShot(i)?.let { WHEN.format(it) }, st.lastShot(i)?.let { WHEN.format(it) },
+                        if (st.earlier(i)) "Ранее" else if (st.inspected(i)) "Да" else "Нет", if (st.broken(i)) "Нерабочее" else null, st.photosOf(i), st.firstShot(i)?.let { WHEN.format(it) }, st.lastShot(i)?.let { WHEN.format(it) },
                         st.folderOf(i)?.let { notes.getOrPut(it) { Store.note(it) } }, st.folderOf(i)?.let { Store.relative(it) })
                 }
                 sheets += Xlsx.Out(l, rows, listOf(7, 18, 50, 16, 8, 16, 16, 10, 18, 11, 13, 9, 17, 17, 40, 40)) { r ->
