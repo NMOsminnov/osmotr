@@ -45,7 +45,7 @@ pub async fn login(ctx: &Ctx, email: &str, password: &str, store: &Path) -> R<Si
         .anisette_provider(anisette)
         .login(password, two_factor)
         .await
-        .map_err(|e| login_failure(&format!("{e:?}")))?;
+        .map_err(|e| login_failure(&format!("{e:?}"), email))?;
     let session = DeveloperSession::from_account(&mut account).await.explain("Apple не открыла доступ к подписи приложений")?;
 
     // Сертификатов у бесплатного Apple ID — два на всё; кончились — отозвать свой старый, а не
@@ -59,8 +59,55 @@ pub async fn login(ctx: &Ctx, email: &str, password: &str, store: &Path) -> R<Si
         .build())
 }
 
+/// Подробности ошибки — без личных данных: адрес Apple ID и номера телефонов вычищаются
+/// до показа. Человек присылает подробности тому, кто разбирается, а чужие учётные
+/// записи ему знать нельзя (правило автора, 13.10.2026).
+fn without_personal(detail: &str, email: &str) -> String {
+    let mut out = detail.to_string();
+    let email = email.trim();
+    if !email.is_empty() {
+        for variant in [email.to_string(), email.to_lowercase()] {
+            out = out.replace(&variant, "<apple-id>");
+        }
+    }
+    // Любой другой адрес почты — слово с «@» и точкой — в заглушку.
+    let words: Vec<String> = out
+        .split_inclusive(|c: char| c.is_whitespace() || "\"',;{}()[]<>".contains(c))
+        .map(|w| {
+            let core = w.trim_end_matches(|c: char| c.is_whitespace() || "\"',;{}()[]<>".contains(c));
+            if core.contains('@') && core.contains('.') { format!("<почта>{}", &w[core.len()..]) } else { w.to_string() }
+        })
+        .collect();
+    let out = words.concat();
+    // Номер телефона: «+», затем цифры с пробелами, дефисами и скобками, всего от 7 цифр.
+    let chars: Vec<char> = out.chars().collect();
+    let mut clean = String::with_capacity(out.len());
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i] == '+' {
+            let mut j = i + 1;
+            let mut digits = 0;
+            while j < chars.len() && (chars[j].is_ascii_digit() || " -()".contains(chars[j])) {
+                if chars[j].is_ascii_digit() { digits += 1; }
+                j += 1;
+            }
+            if digits >= 7 {
+                while j > i + 1 && !chars[j - 1].is_ascii_digit() { j -= 1; }
+                clean.push_str("<телефон>");
+                i = j;
+                continue;
+            }
+        }
+        clean.push(chars[i]);
+        i += 1;
+    }
+    clean
+}
+
 /// Отказ входа — по-человечески: неверный пароль, заблокированный Apple ID, нет сети.
-fn login_failure(detail: &str) -> Failure {
+fn login_failure(detail: &str, email: &str) -> Failure {
+    let detail = without_personal(detail, email);
+    let detail = detail.as_str();
     let low = detail.to_lowercase();
     let text = if low.contains("-20101") || low.contains("incorrect") || low.contains("password") {
         "Неверный Apple ID или пароль"
@@ -72,4 +119,19 @@ fn login_failure(detail: &str) -> Failure {
         "Apple не пустила войти"
     };
     Failure::new(text, detail)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::without_personal;
+
+    #[test]
+    fn personal_data_never_reaches_details() {
+        let raw = r#"AuthFailed { code: -20101, account: "Person.Name@icloud.com", phone: "+996 555 123 456", other: x@y.kg }"#;
+        let clean = without_personal(raw, "person.name@icloud.com");
+        assert!(!clean.to_lowercase().contains("person.name"), "{clean}");
+        assert!(!clean.contains("x@y.kg"), "{clean}");
+        assert!(!clean.contains("555"), "{clean}");
+        assert!(clean.contains("-20101"), "код ошибки остаётся: {clean}");
+    }
 }
