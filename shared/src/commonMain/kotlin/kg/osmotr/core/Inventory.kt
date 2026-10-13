@@ -876,6 +876,25 @@ object Inventory {
         return p
     }
 
+    /**
+     * Снять отметку «осмотрено ранее» с [items] ([on] = false) или поставить её ([on] = true) —
+     * вручную, без импорта (автор, 13.10.2026: «А как отметить невыполненным?»). Сколько
+     * изменилось — в ответе; в журнал — запись.
+     */
+    fun setEarlier(obj: File, items: List<Item>, on: Boolean): Int {
+        val lines = earlierLines(obj).toMutableList()
+        val have = lines.map(::key).toSet()
+        val take = items.filter { (key(id(it)) in have) != on }.distinctBy { key(id(it)) }
+        if (take.isEmpty()) return 0
+        val keys = take.map { key(id(it)) }.toSet()
+        if (on) lines += take.map(::id) else lines.removeAll { key(it) in keys }
+        val f = File(obj, EARLIER)
+        if (lines.isEmpty()) f.delete() else Store.writeDurably(f, (lines.joinToString("\n") + "\n").encodeToByteArray())
+        Journal.add(obj, if (on) "Осмотрено ранее (вручную)" else "Снята отметка «ранее»", take.joinToString(", ") { id(it) }, f, gone = lines.isEmpty())
+        Store.changed()
+        return take.size
+    }
+
     // ---------- Выгрузки ----------
 
     /** Когда опись выгружали в последний раз — скрытым файлом в её папке (для «нового с прошлой»). */

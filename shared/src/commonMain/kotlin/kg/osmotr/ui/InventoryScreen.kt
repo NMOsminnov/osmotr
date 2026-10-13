@@ -298,6 +298,17 @@ fun InventoryScreen(obj: File, into: File? = null, initialQuery: String? = null,
             ) else if (selected.isNotEmpty()) TopAppBar(
                 navigationIcon = { IconButton(onClick = { selected.clear() }) { Icon(Icons.Default.Close, "Снять выбор") } },
                 title = { Text("Отмечено: ${selected.size}") },
+                actions = {
+                    // Отмечены «осмотрено ранее» по ошибке — снять разом (автор: «как отметить невыполненным?»).
+                    val ранее = selected.filter { st?.earlier(it) == true }
+                    if (ранее.isNotEmpty()) TextButton(onClick = {
+                        val items = ранее.toList(); selected.clear()
+                        scope.launch {
+                            val n = withContext(Dispatchers.IO) { Inventory.setEarlier(obj, items, false).also { Inventory.refreshReportSoon(obj) } }
+                            host.toast("Снята отметка «ранее»: $n"); reparse++
+                        }
+                    }) { Text("Снять «ранее» (${ранее.size})") }
+                },
             ) else TopAppBar(
                 navigationIcon = { IconButton(onClick = close) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Назад") } },
                 title = { Column { Text(obj.name, maxLines = 1, overflow = TextOverflow.Ellipsis); Text("Опись", style = MaterialTheme.typography.labelMedium,

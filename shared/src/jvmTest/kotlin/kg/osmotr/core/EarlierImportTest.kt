@@ -101,4 +101,19 @@ class EarlierImportTest {
         assertEquals(setOf(0), s.wide)
         assertEquals("555/1", s.rows[3][1])  // объединённое по высоте — значение размножено, строка не заголовок
     }
+
+    @Test fun снять_отметку_ранее_и_поставить_вручную() {
+        Inventory.importEarlier(obj, ихТаблица(), 1, "их.xlsx")
+        val ноутбук = items().first { it.inventory == "555/1" }
+        assertEquals(1, Inventory.setEarlier(obj, listOf(ноутбук), false))
+        assertFalse("снято — не осмотрено", Inventory.status(obj).inspected(ноутбук))
+        assertEquals(0, Inventory.setEarlier(obj, listOf(ноутбук), false))  // повтор — ничего
+        assertEquals(listOf("0101-345АБ", "555/2"), File(obj, Inventory.EARLIER).readLines().filter { it.isNotBlank() })
+        assertEquals(1, Inventory.setEarlier(obj, listOf(ноутбук), true))
+        assertTrue(Inventory.status(obj).earlier(ноутбук))
+        // Сняли все — файла нет, журнал цел.
+        Inventory.setEarlier(obj, items(), false)
+        assertFalse(File(obj, Inventory.EARLIER).exists())
+        assertTrue(Journal.verify(obj).ok)
+    }
 }

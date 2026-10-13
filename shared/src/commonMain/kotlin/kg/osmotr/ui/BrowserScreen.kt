@@ -356,8 +356,12 @@ fun BrowserScreen(
                         }, remove = { one ->
                             leaving += Inventory.key(Inventory.id(one))
                             scope.launch { withContext(Dispatchers.IO) { Inventory.removeFrom(dir, one).also { warmFolder(it); Inventory.refreshReportSoon(it) } }.let(renamed) }
-                        }, leaving = leaving, shot = { card?.status?.inspected(it) == true }, broken = { card?.status?.broken(it) == true }, setBroken = { one, on ->
+                        }, leaving = leaving,
+                            // «Нерабочее» — только по снимкам: «осмотрено ранее» снимков не даёт.
+                            shot = { (card?.status?.photosOf(it) ?: 0) > 0 }, broken = { card?.status?.broken(it) == true }, setBroken = { one, on ->
                             card?.obj?.let { o -> scope.launch { withContext(Dispatchers.IO) { Inventory.setBroken(o, listOf(one), on); Inventory.refreshReportSoon(o) } } }
+                        }, earlier = { card?.status?.earlier(it) == true }, unsetEarlier = { one ->
+                            card?.obj?.let { o -> scope.launch { withContext(Dispatchers.IO) { Inventory.setEarlier(o, listOf(one), false); Inventory.refreshReportSoon(o) } } }
                         })
                     }
                 }
@@ -532,7 +536,8 @@ private class AfterLongPress { var skip = false }
  */
 @Composable
 private fun ItemCard(items: List<Inventory.Item>, similar: List<Inventory.Item>, pick: () -> Unit, add: (List<Inventory.Item>) -> Unit, remove: (Inventory.Item) -> Unit,
-                     leaving: List<String>, shot: (Inventory.Item) -> Boolean, broken: (Inventory.Item) -> Boolean, setBroken: (Inventory.Item, Boolean) -> Unit) {
+                     leaving: List<String>, shot: (Inventory.Item) -> Boolean, broken: (Inventory.Item) -> Boolean, setBroken: (Inventory.Item, Boolean) -> Unit,
+                     earlier: (Inventory.Item) -> Boolean = { false }, unsetEarlier: (Inventory.Item) -> Unit = {}) {
     // Состав меняется плавно: карточка растёт и сжимается, убранный уезжает, а не пропадает.
     Column(Modifier.fillMaxWidth().panel()
         .animateContentSize(motion()).padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -559,6 +564,11 @@ private fun ItemCard(items: List<Inventory.Item>, similar: List<Inventory.Item>,
                     }, enabled = can || off,
                         leadingIcon = { Icon(AppIcons.Block, null, Modifier.size(18.dp), tint = if (off) BROKEN_RED else MaterialTheme.colorScheme.onSurfaceVariant) },
                         colors = FilterChipDefaults.filterChipColors(selectedContainerColor = BROKEN_RED.copy(alpha = 0.18f)))
+                    // Осмотрено раньше, по импорту отметок, — тут же и снять, если отметили зря.
+                    if (earlier(i)) FilterChip(true, { haptic.performHapticFeedback(HapticFeedbackType.ToggleOff); unsetEarlier(i) }, {
+                        Text("Осмотрено ранее — снять отметку", color = DONE_GREEN)
+                    }, leadingIcon = { Icon(Icons.Default.Close, null, Modifier.size(18.dp), tint = DONE_GREEN) },
+                        colors = FilterChipDefaults.filterChipColors(selectedContainerColor = DONE_GREEN.copy(alpha = 0.16f)))
                 }
                 if (staying > 1) IconButton(onClick = { remove(i) }) { Icon(Icons.Default.Close, "Убрать из папки", tint = MaterialTheme.colorScheme.onSurfaceVariant) }
             }
