@@ -115,6 +115,8 @@ private fun Body(host: Host, incoming: SnapshotStateList<Picked>, start: List<Sc
             // Снимали из списка описи — остаться в нём (следующая бирка), а что легло — плашкой с «Открыть».
             if (ShootFrom.list == got.dir) {
                 ShootFrom.list = null
+                // Ушли в камеру из списка и ничего не сняли — заведённая под это папка пуста.
+                if (got.count == 0) launch(Dispatchers.IO) { runCatching { Store.pruneEmpty(got.dir) } }
                 if (got.count > 0) {
                     // Прежняя плашка (прошлый предмет) пережила уход в камеру — убрать: сказать про этот.
                     snackbar.currentSnackbarData?.dismiss()
@@ -143,6 +145,20 @@ private fun Body(host: Host, incoming: SnapshotStateList<Picked>, start: List<Sc
         val r = snackbar.showSnackbar("Удалено: $what", actionLabel = "Вернуть", duration = SnackbarDuration.Long)
         if (r == SnackbarResult.ActionPerformed) Store.restore(t)
         if (Undo.last.value === t) Undo.last.value = null
+    }
+    // Папка предмета, которую открыли и покинули пустой (зашли в карточку и вышли, ничего не
+    // сняв), — прочь, как только её нет ни в одном экране стека (автор, 13.10.2026: «Если папка
+    // остаётся пустой, её надо удалить»). Пока она под другим экраном (набор из описи, просмотр),
+    // она на месте. Заведённая человеком папка без привязки к предмету так не убирается — её имя
+    // он набрал сам; убирается, когда из неё удалили последнее (Store.pruneEmpty).
+    val held = remember { HashSet<File>() }
+    val inStack = stack.mapNotNull { (it as? Screen.Browser)?.dir ?: (it as? Screen.Inventory)?.into }.toSet()
+    LaunchedEffect(inStack) {
+        val left = held - inStack
+        held.clear(); held += inStack
+        if (left.isNotEmpty()) launch(Dispatchers.IO) {
+            left.forEach { d -> runCatching { if (File(d, Inventory.MEMBERS).isFile) Store.pruneEmpty(d) } }
+        }
     }
     fun push(s: Screen) { stack.add(s) }
     fun pop() { if (stack.size > 1) stack.removeAt(stack.lastIndex) }

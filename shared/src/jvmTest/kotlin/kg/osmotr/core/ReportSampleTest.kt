@@ -39,6 +39,7 @@ class ReportSampleTest {
         val f = File(dir, имя)
         java.io.File(f.path).outputStream().use { ImageIO.write(img, "jpg", it) }
         java.io.File(f.path).setLastModified(начало + d * день + m * 60_000L)
+        Journal.now = { начало + d * день + m * 60_000L }
         Journal.add(dir, "Снимок", Store.relative(f), f)
         return f
     }
@@ -91,6 +92,9 @@ class ReportSampleTest {
         ), wide = setOf(0, 4))
         val ранее = Inventory.importEarlier(obj, отметки, 1, "отметки-2025.xlsx")
         assertEquals(3, ранее.fresh); assertEquals(listOf("Инв. №", "999/999"), ранее.unknown)
+        // Шкаф без бирки осмотрели, но снимать нечего — отметили вручную, в тот же день.
+        Journal.now = { начало + 2 * день + 30 * 60_000L }
+        Inventory.setEarlier(obj, listOf(по("Н180")), true)
 
         // Мимо приложения: подменили снимок, удалили другой, подбросили третий.
         java.io.File(File(огнетушитель, "огнетушитель.jpg").path).appendBytes(byteArrayOf(1, 2, 3))
@@ -98,6 +102,7 @@ class ReportSampleTest {
         java.io.File(File(перегородка, "подброшен.jpg").path).writeBytes(ByteArray(300) { 9 })
 
         Journal.forget()
+        Journal.now = { Platform.nowMs() }
         Inventory.writeReport(obj)
         val отчёт = Inventory.reportFile(Inventory.fileIn(obj)!!)
         val книга = Xlsx.sheets(отчёт.readBytes())
@@ -109,7 +114,23 @@ class ReportSampleTest {
         assertEquals("Да", строка("INV-2024-0001")[h.indexOf("Осмотрено")])
         assertEquals("Да", строка("ОС-000102")[h.indexOf("Осмотрено")])  // в общей папке
         assertEquals("Нерабочее", строка("777/1002")[h.indexOf("Состояние")])
-        assertEquals("Нет", строка("Н180")[h.indexOf("Осмотрено")])
+        assertEquals("Да", строка("Н180")[h.indexOf("Осмотрено")])
+        // По дням — по журналу: огнетушитель подменили сегодня, а снят он 8-го; отметка вручную — в свой день;
+        // импорт — осмотренное до приложения, строкой сверху.
+        val дни = книга.first { it.name == "По дням" }.rows.drop(1).associate { it[0] to it.drop(1) }
+        // Последней строкой — сегодня: подброшенный мимо приложения снимок (без записи — по времени файла).
+        assertEquals(дни.toString(), listOf("до приложения (импорт)", "06.10.2026", "07.10.2026", "08.10.2026"), дни.keys.take(4))
+        assertEquals(listOf("3", "0", "3", "0", "3"), дни.getValue("до приложения (импорт)").take(5))
+        assertEquals(listOf("4", "4", "0", "3", "7"), дни.getValue("06.10.2026").take(5))
+        assertEquals(listOf("3", "3", "0", "4", "10"), дни.getValue("07.10.2026").take(5))
+        assertEquals(listOf("2", "1", "1", "2", "12"), дни.getValue("08.10.2026").take(5))
+        assertTrue(строка("Н179")[h.indexOf("Первый снимок")].startsWith("08.10.2026"))
+        // Прочая работа дня: 6-го — комментарий к серверу и «нерабочее», 7-го — голосовая заметка.
+        val шапка = книга.first { it.name == "По дням" }.rows[0]
+        fun в(d: String, col: String) = дни.getValue(d)[шапка.indexOf(col) - 1]
+        assertEquals("1", в("06.10.2026", "Комментарии (папок)"))
+        assertEquals("1", в("06.10.2026", "Отмечено нерабочими"))
+        assertEquals("1", в("07.10.2026", "Голосовые"))
         val сверка = книга.first { it.name == "Сверка файлов" }.rows.drop(1).map { it[1] }.toSet()
         assertTrue(сверка.toString(), сверка.containsAll(setOf("изменён", "пропал без записи", "появился без записи")))
         val нет = книга.first { it.name == "Нет в описи" }.rows

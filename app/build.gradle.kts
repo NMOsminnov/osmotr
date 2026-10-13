@@ -15,8 +15,8 @@ android {
         applicationId = "kg.osmotr"
         minSdk = 26
         targetSdk = 37
-        versionCode = 10
-        versionName = "3.3"
+        versionCode = 11
+        versionName = "3.4"
     }
 
     signingConfigs {
@@ -89,4 +89,25 @@ dependencies {
     testImplementation(libs.junit)
     testImplementation(libs.robolectric)
     testImplementation(libs.androidx.test.core)
+    testImplementation(libs.androidx.test.junit)
+    testImplementation(platform(libs.compose.bom))
+    testImplementation(libs.compose.ui.test.junit4)
+    debugImplementation(libs.compose.ui.test.manifest)
+}
+
+// Матрица движения (как у приложения APCS): действие × блок покадрово, три повтора — отчёт
+// app/build/reports/motion-matrix/report.md (и .json). Запуск: ./gradlew :app:motionMatrix
+val matrixRequested = gradle.startParameter.taskNames.any { it.substringAfterLast(':') == "motionMatrix" }
+tasks.withType<Test>().configureEach {
+    if (name == "testDebugUnitTest") {
+        if (matrixRequested) { filter.includeTestsMatching("kg.osmotr.motion.*"); outputs.upToDateWhen { false } }
+        else filter.excludeTestsMatching("kg.osmotr.motion.*")
+    }
+}
+tasks.register("motionMatrix") {
+    group = "verification"
+    description = "Матрица движения: флаги рывка, перелёта, дрожи, замены, мелькания, разнобоя"
+    dependsOn("testDebugUnitTest")
+    val report = file("build/reports/motion-matrix/report.md")
+    doLast { println("Матрица движения: ${report.absolutePath}") }
 }

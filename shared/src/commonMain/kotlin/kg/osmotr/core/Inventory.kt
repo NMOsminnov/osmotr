@@ -333,11 +333,41 @@ object Inventory {
     private val INV_MARK = Regex("""(?iu)(?:^|[^\p{L}])(инв|inv)[a-zа-я]*\.?\s*(№|n\b|no\b|номер|ном)""")
     private val INV_IN_NAME = Regex("""[,;(]?\s*(?:инв|inv)[a-zа-я]*\.?\s*(?:№|n|no|номер)?\s*[:.]?\s*([0-9A-Za-zА-Яа-яЁё](?:[0-9A-Za-zА-Яа-яЁё/.,\-]| (?=\d))*[0-9A-Za-zА-Яа-яЁё])\)?""", RegexOption.IGNORE_CASE)
 
-    /** Таблица листа; null — на листе нет списка предметов (нет ни инвентарников, ни наименований). */
-    fun detect(sheet: Xlsx.Sheet): Table? {
+    /**
+     * Таблица листа; null — на листе нет списка предметов (нет ни инвентарников, ни наименований).
+     * [choice] — что человек указал сам (экран «Столбцы описи»): лист не брать, где шапка, откуда
+     * предметы, какой столбец за какое поле. Указанное — поверх подбора; не указанное — как решит подбор.
+     */
+    fun detect(sheet: Xlsx.Sheet, choice: SheetChoice? = null): Table? {
+        if (choice?.skip == true) return null
+        val auto = detectAuto(sheet, choice?.header)
+        if (choice == null || choice.columns.isEmpty() && choice.body == null && choice.header == null) return auto
+        val rows = sheet.rows
+        val hr = choice.header ?: auto?.headerRow ?: -1
+        val width = rows.maxOfOrNull { it.size } ?: 0
+        val headers = auto?.headers ?: if (hr >= 0) composite(rows, hr) else List(width) { "" }
+        val body = (choice.body ?: auto?.body ?: (hr + 1)).coerceIn(0, rows.size)
+        val columns = HashMap(auto?.columns.orEmpty())
+        for ((name, c) in choice.columns) {
+            val f = Field.entries.firstOrNull { it.name == name } ?: continue
+            if (c >= 0) columns.entries.removeAll { it.value == c && it.key != f }  // столбец — одному полю
+            if (c < 0) columns.remove(f) else columns[f] = c
+        }
+        if (Field.INVENTORY !in columns && Field.NAME !in columns) return null
+        // Инвентарник из наименования — если его столбца нет и человек не сказал «не брать».
+        val fromName = Field.INVENTORY !in columns && columns[Field.NAME]?.let { c ->
+            val names = rows.drop(body).map { it.getOrElse(c) { "" } }.filter(String::isNotBlank)
+            names.isNotEmpty() && names.count { INV_IN_NAME.containsMatchIn(it) } >= names.size / 2
+        } == true
+        return Table(sheet.name, hr, headers, columns, emptyList(), auto?.candidates.orEmpty(),
+            rows.drop(body).take(5), count = rows.size, body = body, invFromName = fromName)
+    }
+
+    /** Подбор сам; [forcedHeader] — строка шапки, указанная человеком (−1 — шапки нет). */
+    private fun detectAuto(sheet: Xlsx.Sheet, forcedHeader: Int?): Table? {
         val rows = sheet.rows
         if (rows.count { it.any(String::isNotBlank) } < 2) return null  // шапка и хоть одна строка
-        val hr = headerRow(rows)
+        val hr = if (forcedHeader != null) forcedHeader.takeIf { it in rows.indices } else headerRow(rows)
         val headers = if (hr != null) composite(rows, hr) else emptyList()
         var body = (hr ?: -1) + 1
         while (body < rows.size && rows[body].isNotEmpty() && isNumbering(rows[body])) body++
@@ -503,8 +533,204 @@ object Inventory {
     }
 
     /** Вся опись из байтов книги (без папки и кэша). */
-    fun parseBook(book: ByteArray, progress: ((Float, String) -> Unit)? = null): List<Item> =
-        distinctIds(Xlsx.sheets(book, progress).flatMap { s -> detect(s)?.let { items(s, it) }.orEmpty() })
+    fun parseBook(book: ByteArray, progress: ((Float, String) -> Unit)? = null, choices: Choices = Choices()): List<Item> =
+        read(Xlsx.sheets(book, progress), choices).items
+
+    // ---------- Чтение вручную: лист, шапка, первая строка, столбцы ----------
+    //
+    // Подбор решает сам, но ошибиться может (автор, 13.10.2026: «Есть ли возможность отредактировать
+    // чтение файла, например если автоматически не тот столбец считался»). Человек указывает на
+    // экране «Столбцы описи»: лист не брать, где шапка, с какой строки предметы, какой столбец за
+    // какое поле. Не указанное — по-прежнему подбор. Выбор лежит рядом с описью, виден по USB, идёт
+    // в журнал и в архив; пришёл исправленный файл того же шаблона — выбор остаётся в силе, другой
+    // шаблон (верх листа иной) — выбор не применяется, и экран об этом говорит.
+
+    /** Ручной выбор к описи — файлом рядом с ней. */
+    const val COLUMNS = "Столбцы описи.json"
+
+    @kotlinx.serialization.Serializable
+    data class SheetChoice(
+        val sheet: String,
+        /** Лист не брать в опись (сводка, правила, вынесенное). */
+        val skip: Boolean = false,
+        /** Строка шапки, с нуля; −1 — шапки нет; null — как найдёт подбор. */
+        val header: Int? = null,
+        /** Первая строка предметов, с нуля; null — сразу под шапкой. */
+        val body: Int? = null,
+        /** Поле ([Field.name]) → столбец, с нуля; −1 — поле не брать. */
+        val columns: Map<String, Int> = emptyMap(),
+        /** Отпечаток верха листа, к которому относится выбор, и сколько строк он охватывает. */
+        val sign: String = "", val signRows: Int = 0,
+    ) {
+        val empty get() = !skip && header == null && body == null && columns.isEmpty()
+    }
+
+    @kotlinx.serialization.Serializable
+    data class Choices(val sheets: List<SheetChoice> = emptyList()) {
+        fun of(name: String) = sheets.firstOrNull { it.sheet == name }
+        fun with(c: SheetChoice) = Choices(sheets.filter { it.sheet != c.sheet } + listOfNotNull(c.takeUnless { it.empty }))
+    }
+
+    /** Отпечаток верха листа: [rows] первых строк (шапка и что над ней). */
+    fun signOf(sheet: Xlsx.Sheet, rows: Int): String =
+        sheet.rows.take(rows.coerceIn(1, 15)).joinToString("\n") { r -> r.joinToString("\t") { norm(it) }.trimEnd('\t') }.hashCode().toString(16)
+
+    /** Выбор с отпечатком того верха листа, который он описывает (до первой строки предметов). */
+    fun sealed(sheet: Xlsx.Sheet, c: SheetChoice): SheetChoice {
+        if (c.empty) return c
+        val rows = (detect(sheet, c)?.body ?: c.body ?: 1).coerceAtLeast(1)
+        return c.copy(sign = signOf(sheet, rows), signRows = rows)
+    }
+
+    /** Лист, как его прочли: таблица (null — не взят), его предметы, ручной выбор и подошёл ли он. */
+    class SheetReading(val sheet: Xlsx.Sheet, val table: Table?, val items: List<Item>, val choice: SheetChoice?, val stale: Boolean)
+    class Reading(val sheets: List<SheetReading>, val items: List<Item>)
+
+    /** Прочесть листы с ручным выбором поверх подбора. */
+    fun read(sheets: List<Xlsx.Sheet>, choices: Choices): Reading {
+        val per = sheets.map { s ->
+            val c = choices.of(s.name)
+            val fits = c == null || c.sign.isEmpty() || c.sign == signOf(s, c.signRows)
+            val t = detect(s, c.takeIf { fits })
+            SheetReading(s, t, t?.let { items(s, it) }.orEmpty(), c, stale = !fits)
+        }
+        return Reading(per, distinctIds(per.flatMap { it.items }))
+    }
+
+    fun choicesOf(obj: File): Choices = runCatching {
+        File(obj, COLUMNS).takeIf { it.isFile }?.let { pretty.decodeFromString(Choices.serializer(), it.readText()) }
+    }.getOrNull() ?: Choices()
+
+    /** Записать выбор (пустой — убрать файл): в журнал — что именно указано. */
+    fun setChoices(obj: File, c: Choices) {
+        val f = File(obj, COLUMNS)
+        val clean = Choices(c.sheets.filterNot { it.empty })
+        if (clean == choicesOf(obj)) return
+        if (clean.sheets.isEmpty()) f.delete() else Store.writeDurably(f, pretty.encodeToString(Choices.serializer(), clean).encodeToByteArray())
+        Journal.add(obj, "Столбцы описи", describe(clean), f, gone = clean.sheets.isEmpty())
+        Store.scan(listOf(f)); Store.changed()
+    }
+    private val pretty = kotlinx.serialization.json.Json { prettyPrint = true; ignoreUnknownKeys = true }
+
+    /** Буква столбца, как в Excel: 0 → «A», 26 → «AA». */
+    fun letter(c: Int): String {
+        var n = c + 1; val out = StringBuilder()
+        while (n > 0) { val r = (n - 1) % 26; out.insert(0, 'A' + r); n = (n - 1) / 26 }
+        return out.toString()
+    }
+
+    /** Выбор словами — для журнала и отчёта. */
+    fun describe(c: Choices): String = if (c.sheets.isEmpty()) "как решит приложение" else c.sheets.joinToString("; ") { s ->
+        "«${s.sheet}»: " + if (s.skip) "не брать" else (listOfNotNull(
+            s.header?.let { if (it < 0) "без шапки" else "шапка — строка ${it + 1}" },
+            s.body?.let { "предметы со строки ${it + 1}" },
+        ) + s.columns.entries.map { (f, c) -> (Field.entries.firstOrNull { it.name == f }?.title ?: f) + " — " + if (c < 0) "не брать" else letter(c) })
+            .joinToString(", ")
+    }
+
+    /**
+     * Что в прочитанном подозрительно — повод проверить столбцы. По предметам: инвентарник у
+     * малой доли, наименования пусты или одни числа, инвентарники повторяются массово.
+     */
+    fun itemWarnings(items: List<Item>): List<String> = buildList {
+        val n = items.size
+        if (n == 0) { add("Ни одного предмета: укажите столбец с инвентарными номерами или наименованиями"); return@buildList }
+        val withInv = items.count { it.inventory.isNotEmpty() }
+        if (withInv == 0) add("Инвентарных номеров нет ни у одного предмета — предметы пойдут по номерам строк")
+        else if (withInv * 2 < n) add("Инвентарный номер есть только у $withInv из $n предметов — проверьте столбец «Инв. номер»")
+        val noName = items.count { it.name.isEmpty() }
+        if (noName * 10 > n * 3) add("Без наименования $noName из $n предметов — проверьте столбец «Наименование»")
+        val numeric = items.count { it.name.isNotEmpty() && it.name.none(Char::isLetter) }
+        if (numeric * 2 > n) add("В наименованиях почти одни числа — похоже, взят не тот столбец")
+        val dup = items.filter { it.inventory.isNotEmpty() }.groupBy { key(it.inventory) }.values.filter { it.size > 1 }.sumOf { it.size }
+        if (withInv > 0 && dup * 5 > withInv) add("Инвентарные номера повторяются у $dup предметов — проверьте столбец «Инв. номер»")
+    }
+
+    /** Предупреждения ко всему прочитанному: по предметам, по листам и по выбору, который не подошёл. */
+    fun warnings(r: Reading): List<String> = buildList {
+        r.sheets.filter { it.stale }.forEach { add("Прежний ручной выбор к листу «${it.sheet.name}» не подошёл: верх листа другой — столбцы найдены заново") }
+        addAll(itemWarnings(r.items))
+        r.sheets.filter { it.table == null && it.choice?.skip != true && it.sheet.rows.count { row -> row.any(String::isNotBlank) } >= 5 }
+            .forEach { add("Лист «${it.sheet.name}» не взят в опись — если на нём предметы, укажите столбцы") }
+    }
+
+    // ---------- Чужой и битый файл ----------
+
+    /**
+     * Почему книга не годится — по содержимому, а не по расширению: 1С отдаёт «.xls», который на
+     * деле веб-страница; мессенджер теряет расширение; пароль превращает .xlsx в контейнер OLE;
+     * недокачанный файл обрывается посреди архива. null — это книга Excel (.xlsx) с листами.
+     */
+    fun problemOf(book: ByteArray): String? {
+        if (book.isEmpty()) return "файл пустой (0 байт) — похоже, не докачался; пришлите заново"
+        fun starts(vararg b: Int) = book.size >= b.size && b.indices.all { book[it] == b[it].toByte() }
+        val head = book.copyOfRange(0, minOf(book.size, 4096)).decodeToString().trimStart('﻿', ' ', '\r', '\n', '\t').lowercase()
+        when {
+            starts(0xD0, 0xCF, 0x11, 0xE0) -> return if (utf16In(book, "EncryptionInfo"))
+                "файл защищён паролем: откройте в Excel, снимите пароль (Файл → Сведения → Защита книги) и сохраните заново"
+                else "старый формат Excel (.xls): откройте в Excel и сохраните как .xlsx"
+            starts(0x25, 0x50, 0x44, 0x46) -> return "это PDF, а не таблица: нужна сама опись в Excel (.xlsx)"
+            starts(0xFF, 0xD8, 0xFF) || starts(0x89, 0x50, 0x4E, 0x47) -> return "это картинка, а не таблица: нужна опись в Excel (.xlsx)"
+            head.startsWith("<?xml") && "urn:schemas-microsoft-com:office:spreadsheet" in head ->
+                return "таблица Excel 2003 (XML): откройте в Excel и сохраните как .xlsx"
+            head.startsWith("<") && ("<html" in head || "<table" in head || "<!doctype" in head) ->
+                return "это веб-страница (HTML) под видом Excel — так выгружает 1С: откройте в Excel и сохраните как .xlsx"
+            starts(0x50, 0x4B) -> {}
+            text(book) -> return "это текст (CSV), а не книга Excel: откройте в Excel и сохраните как .xlsx"
+            else -> return "это не таблица Excel (.xlsx)"
+        }
+        val files = unzip(book)
+        if (files.isEmpty()) return "файл повреждён — не открывается как книга Excel (похоже, не докачался); пришлите заново"
+        if ("word/document.xml" in files) return "это документ Word, а не таблица Excel"
+        if (files.keys.any { it.startsWith("ppt/") }) return "это презентация, а не таблица Excel"
+        if (files["mimetype"]?.decodeToString()?.contains("opendocument.spreadsheet") == true)
+            return "таблица LibreOffice (.ods): сохраните её как .xlsx"
+        if ("xl/workbook.xml" !in files) return "это архив, а не книга Excel"
+        if (files.keys.none { it.startsWith("xl/worksheets/") }) return "в книге нет листов — файл повреждён; пришлите заново"
+        return null
+    }
+
+    /** Строка [s] в UTF-16LE где-то в байтах (имена потоков контейнера OLE). */
+    private fun utf16In(book: ByteArray, s: String): Boolean {
+        val pat = ByteArray(s.length * 2) { i -> if (i % 2 == 0) s[i / 2].code.toByte() else 0 }
+        outer@ for (i in 0..book.size - pat.size) { for (j in pat.indices) if (book[i + j] != pat[j]) continue@outer; return true }
+        return false
+    }
+
+    /** Похоже на текст: в начале нет нулевых байтов и почти нет управляющих. */
+    private fun text(book: ByteArray): Boolean {
+        val head = book.copyOfRange(0, minOf(book.size, 4096))
+        return head.none { it == 0.toByte() } && head.count { it in 1..8 || it in 14..31 } * 50 < head.size
+    }
+
+    /** Такая же книга уже лежит описью — её папка (сравнение по размеру, затем по байтам). */
+    fun sameAs(book: ByteArray): File? = Store.foldersIn(Store.root).firstOrNull { d ->
+        fileIn(d)?.takeIf { it.length() == book.size.toLong() }?.readBytes()?.contentEquals(book) == true
+    }
+
+    /** Что будет при замене файла описи [dir] книгой [book]: тот же ли, сколько предметов, чьи папки потеряют предмет. */
+    class ReplaceCheck(val same: Boolean, val items: Int, val bound: Int, val lost: List<String>)
+
+    fun checkReplace(dir: File, book: ByteArray): ReplaceCheck {
+        val old = fileIn(dir)
+        if (old != null && old.length() == book.size.toLong() && old.readBytes().contentEquals(book)) return ReplaceCheck(true, 0, 0, emptyList())
+        val keys = parseBook(book, choices = choicesOf(dir)).map { key(id(it)) }.toSet()
+        val bound = boundIn(dir)
+        return ReplaceCheck(false, keys.size, bound.size, bound.filter { key(it) !in keys })
+    }
+
+    /** Предметы, у которых в описи [dir] уже есть папка (по «Инвентарники.txt»). */
+    fun boundIn(dir: File): List<String> = dir.walkTopDown().onEnter { it == dir || !it.name.startsWith(".") }
+        .filter { it.isDirectory && it != dir }.flatMap { members(it) }.distinct().toList()
+
+    /** Прежний файл описи — до последней замены: вернуть, если заменили не тем. Скрытый, в журнал не идёт. */
+    const val PREVIOUS = ".прежняя опись.xlsx"
+    fun hasPrevious(dir: File) = File(dir, PREVIOUS).isFile
+    /** Вернуть прежний файл; нынешний становится прежним — можно вернуть обратно. */
+    fun restorePrevious(dir: File) {
+        val b = File(dir, PREVIOUS).readBytes()
+        replace(dir) { it.write(b) }
+    }
 
     // ---------- Опись в папке ----------
 
@@ -538,43 +764,36 @@ object Inventory {
     }
 
     /**
-     * Книга (байты файла) — новой описью в своей папке. Только .xlsx (старый .xls — сохранить в
-     * Excel как .xlsx); без списка предметов — отказ с понятной причиной. Имя — из имени файла,
-     * а если оно мусорное (мессенджеры шлют «040dc55f-115.4.-____.xlsx») — из заголовка в книге.
+     * Книга (байты файла) — новой описью в своей папке. Годится ли — по содержимому ([problemOf]):
+     * не книга, битая, под паролем — отказ с понятной причиной, папка не заводится. Такая же уже
+     * загружена — отказ с её именем. Книга читается, а списка предметов подбор не нашёл — опись
+     * всё равно заводится, пустой: человек укажет столбцы сам (экран «Столбцы описи»). Имя — из
+     * имени файла, а если оно мусорное (мессенджеры шлют «040dc55f-115.4.-____.xlsx») — из заголовка в книге.
      */
     fun importBook(book: ByteArray, fileName: String, onFile: (File) -> Unit = {}): Parsed {
-        val tmp = checked(book, fileName)
+        problemOf(book)?.let { throw IllegalArgumentException(it) }
+        sameAs(book)?.let { throw IllegalArgumentException("эта опись уже загружена — «${it.name}»") }
+        val tmp = File(Store.cacheDir, "import-${Platform.nanoTime()}.xlsx").also { it.parentFile?.mkdirs(); it.writeBytes(book) }
         val dir = try { create(nameFor(fileName, tmp)) { it.write(book) } } finally { tmp.delete() }
         val f = fileIn(dir)!!
         onFile(f)
-        // Разбор — сразу, один раз: кэш готов, опись открывается мгновенно. Списка нет — опись не заводится.
+        // Разбор — сразу, один раз: кэш готов, опись открывается мгновенно.
         val p = runCatching { parse(f) }.getOrElse { dir.deleteRecursively(); Store.changed(); throw it }
-        if (p.items.isEmpty()) { dir.deleteRecursively(); Store.changed(); throw IllegalArgumentException(NO_LIST) }
+        if (p.items.isEmpty() && Xlsx.sheets(book).all { s -> s.rows.none { r -> r.any(String::isNotBlank) } }) {
+            dir.deleteRecursively(); Store.changed(); throw IllegalArgumentException("в книге все листы пустые")
+        }
         return p
     }
 
-    /** Прикрепить опись к уже начатой папке [dir]. */
+    /**
+     * Прикрепить опись к уже начатой папке [dir] или заменить её файл. Книга не годится — отказ,
+     * прежняя опись цела. Годится — ложится, прежний файл — в запас ([restorePrevious]); списка
+     * подбор не нашёл — человек укажет столбцы или вернёт прежний файл.
+     */
     fun attachBook(book: ByteArray, fileName: String, dir: File): Parsed {
-        checked(book, fileName).delete()
-        val old = fileIn(dir)?.readBytes()
+        problemOf(book)?.let { throw IllegalArgumentException(it) }
         replace(dir) { it.write(book) }
-        val p = parse(fileIn(dir)!!)
-        if (p.items.isNotEmpty()) return p
-        // Списка нет — вернуть прежнюю опись (или убрать пустую).
-        if (old != null) replace(dir) { it.write(old) } else fileIn(dir)?.let { Journal.add(dir, "Файл описи", it.name, it, gone = true); it.delete() }
-        Store.changed()
-        throw IllegalArgumentException(NO_LIST)
-    }
-
-    private const val NO_LIST = "в файле не нашли список предметов (или файл повреждён)"
-
-    private fun checked(book: ByteArray, fileName: String): File {
-        val ext = fileName.substringAfterLast('.', "").lowercase()
-        require(ext != "xls") { "старый формат .xls: откройте в Excel и сохраните как .xlsx" }
-        require(ext == "xlsx" || ext.isEmpty()) { "это не таблица Excel (.xlsx)" }
-        val tmp = File(Store.cacheDir, "import-${Platform.nanoTime()}.xlsx")
-        tmp.parentFile?.mkdirs(); tmp.writeBytes(book)
-        return tmp
+        return parse(fileIn(dir)!!)
     }
 
     /** Имя описи: из имени файла, если оно человеческое; иначе — заголовок из книги; иначе — «Опись от 08.10». */
@@ -588,11 +807,15 @@ object Inventory {
         return title ?: ("Опись от " + Platform.format(Platform.nowMs(), "dd.MM"))
     }
 
-    /** Заменить файл описи папки (пришла исправленная): папки предметов остаются, выбор столбцов — заново. */
+    /**
+     * Заменить файл описи папки (пришла исправленная): папки предметов остаются; ручной выбор
+     * столбцов — в силе, если шаблон тот же; прежний файл — в запас ([PREVIOUS]).
+     */
     fun replace(dir: File, write: (okio.BufferedSink) -> Unit) {
         require(dir != Store.root) { "опись — только в своей папке" }  // в корне её не видно и не удалить
         val f = fileIn(dir) ?: File(dir, PREFIX + dir.name + ".xlsx")
         cacheFile(f).delete()
+        if (f.isFile) runCatching { Store.writeDurably(File(dir, PREVIOUS), f.readBytes()) }
         Store.writeDurably(f, write)
         cacheFile(f).delete()
         Journal.add(dir, "Файл описи", f.name, f)
@@ -670,7 +893,12 @@ object Inventory {
     @kotlinx.serialization.Serializable
     private class Cached(val items: List<Item>)
     private val json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
-    private fun cacheFile(f: File) = File(Store.cacheDir, "inventory/" + ("v7|" + f.absolutePath + "|" + f.length() + "|" + f.lastModified()).hashCode() + ".json")
+    private fun cacheFile(f: File) = File(Store.cacheDir, "inventory/" + ("v8|" + f.absolutePath + "|" + stampOf(f)).hashCode() + ".json")
+    /** Файл описи и выбор столбцов к нему: сменилось одно из двух — разбор заново. */
+    private fun stampOf(f: File): String {
+        val c = File(f.parentFile!!, COLUMNS)
+        return "${f.length()}|${f.lastModified()}|${c.length()}|${c.lastModified()}"
+    }
     private fun cached(f: File, cache: File): Parsed? = runCatching { if (cache.isFile) Parsed(f, json.decodeFromString<Cached>(cache.readText()).items) else null }.getOrNull()
 
     /**
@@ -679,7 +907,7 @@ object Inventory {
      * и каждую отметку — 70 мс на 5,7 тыс. строк на компьютере, на телефоне в разы дольше.
      */
     fun parse(f: File): Parsed {
-        val stamp = f.length() to f.lastModified()
+        val stamp = stampOf(f)
         kotlinx.atomicfu.locks.synchronized(memoLock) { memo[f.absolutePath]?.takeIf { it.first == stamp }?.let { return it.second } }
         val cache = cacheFile(f)
         val p = cached(f, cache) ?: kotlinx.atomicfu.locks.synchronized(lockOf(f.absolutePath)) {
@@ -688,7 +916,7 @@ object Inventory {
         kotlinx.atomicfu.locks.synchronized(memoLock) { memo[f.absolutePath] = stamp to p }
         return p
     }
-    private val memo = HashMap<String, Pair<Pair<Long, Long>, Parsed>>()
+    private val memo = HashMap<String, Pair<String, Parsed>>()
     private val memoLock = kotlinx.atomicfu.locks.SynchronizedObject()
 
     private fun parseFresh(f: File, cache: File): Parsed {
@@ -699,8 +927,7 @@ object Inventory {
         // Чтение — 85 % шкалы, поиск столбцов и строк — остальное.
         val sheets = Xlsx.sheets(book, progress = { part, sheet -> tell(f, 0.85f * part, "Читаем лист «$sheet»") }); lap("листы")
         tell(f, 0.88f, "Ищем столбцы")
-        val tables = sheets.mapNotNull { s -> detect(s)?.let { s to it } }; lap("столбцы")
-        val items = distinctIds(tables.flatMap { (s, tb) -> items(s, tb) }); lap("предметы")
+        val items = read(sheets, choicesOf(f.parentFile!!)).items; lap("столбцы и предметы")
         tell(f, 0.97f, "Собираем список: ${items.size} предметов")
         runCatching { cache.parentFile?.mkdirs(); cache.writeText(json.encodeToString(Cached.serializer(), Cached(items))) }; lap("кэш")
         Platform.log("разбор ${f.name}: ${items.size} предметов, мс:$times")
@@ -1032,8 +1259,37 @@ object Inventory {
     private object WHEN { fun format(ms: Long) = Platform.format(ms, "dd.MM.yyyy HH:mm") }
     private object DAY { fun format(ms: Long) = Platform.format(ms, "dd.MM.yyyy") }
 
+    /** Есть ли у папки [d] голосовые заметки: «Да» / «Нет» (автор, 13.10.2026: «Просто указывай наличие. Да/нет»). */
+    private fun voiceCount(d: File): String = if (Store.voiceNotes(d).isNotEmpty()) "Да" else "Нет"
+
+    /**
+     * Комментарии ко всей описи — своим листом (автор, 13.10.2026: «Комментарии на опись выносим
+     * отдельной страницей»): комментарий, голосовые заметки (имя файла и когда записана) и
+     * контакты корня описи. Ничего нет — листа нет.
+     */
+    private fun aboutObject(obj: File): List<Xlsx.Out> {
+        val note = Store.note(obj)
+        val voice = Store.voiceNotes(obj)
+        val people = Store.contacts(obj)
+        if (note == null && voice.isEmpty() && people.isEmpty()) return emptyList()
+        val rows = mutableListOf<List<Any?>>(listOf("Что", "Содержание", "Когда"))
+        note?.let { rows += listOf("Комментарий", it, null) }
+        voice.forEach { v -> rows += listOf("Голосовая заметка", v.name, WHEN.format(v.lastModified())) }
+        people.forEach { c -> rows += listOf("Контакт", c.text(), null) }
+        return listOf(Xlsx.Out("Комментарии к описи", rows, listOf(20, 80, 17)))
+    }
+
     private fun writeReportLocked(obj: File) {
         val st = status(obj)
+        val log = Journal.entries(obj)
+        val seen = Journal.firstSeen(log)
+        // Отмечено осмотренным вручную — когда (по журналу; снятая отметка — забыта). Отметки импортом
+        // в журнале без перечня — это осмотренное до приложения, не работа того дня.
+        val marked = HashMap<String, Long>()
+        for (e in log) when (e.what) {
+            "Отмечено осмотренным", "Осмотрено ранее (вручную)" -> e.subject.split(", ").forEach { marked.getOrPut(key(it)) { e.t } }
+            "Снята отметка «осмотрено»", "Снята отметка «ранее»" -> e.subject.split(", ").forEach { marked.remove(key(it)) }
+        }
         for (f in filesIn(obj)) {
             val p = parse(f)
             val lists = p.lists
@@ -1050,6 +1306,14 @@ object Inventory {
             // Столбец: заголовок, ширина, есть ли он, значение строки.
             class Col(val title: String, val width: Int, val on: Boolean, val value: (Item) -> Any?)
             val notes = HashMap<File, String?>()  // комментарий папки — что с предметом не так (общая папка — один раз)
+            // Голосовые заметки папок — столбцом наличия, «Да» / «Нет» (автор, 13.10.2026: «Если
+            // возможно, встраиваем в Excel. Нет — добавляем столбцом наличие»; «Ссылки в Excel — не вариант»; «Просто указывай наличие. Да/нет»).
+            val voices = HashMap<File, Any?>()
+            fun voiceOf(d: File) = voices.getOrPut(d) { voiceCount(d) }
+            val hasVoice = p.items.any { i -> st.folderOf(i)?.let(::voiceOf) == "Да" }
+            // Время снимков — по журналу (когда лёг в приложение), без записи — по файлу.
+            val shots = HashMap<File, List<Long>>()
+            fun shotsOf(d: File) = shots.getOrPut(d) { Store.photoTree(d).map { f -> seen[Store.relative(f)] ?: f.lastModified() }.sorted() }
             val cols = listOf(
                 Col("№", 7, true) { i -> i.number.toLongOrNull() ?: i.number },
                 Col("Инв. номер", 18, true) { i -> i.inventory },
@@ -1063,9 +1327,10 @@ object Inventory {
                 Col("Осмотрено", 11, true) { i -> if (st.inspected(i)) "Да" else "Нет" },
                 Col("Состояние", 13, true) { i -> if (st.broken(i)) "Нерабочее" else null },
                 Col("Снимков", 9, true) { i -> st.photosOf(i) },
-                Col("Первый снимок", 17, true) { i -> st.firstShot(i)?.let { WHEN.format(it) } },
-                Col("Последний снимок", 17, true) { i -> st.lastShot(i)?.let { WHEN.format(it) } },
+                Col("Первый снимок", 17, true) { i -> st.folderOf(i)?.let(::shotsOf)?.firstOrNull()?.let { WHEN.format(it) } },
+                Col("Последний снимок", 17, true) { i -> st.folderOf(i)?.let(::shotsOf)?.lastOrNull()?.let { WHEN.format(it) } },
                 Col("Комментарий", 40, true) { i -> st.folderOf(i)?.let { notes.getOrPut(it) { Store.note(it) } } },
+                Col("Голосовые", 12, hasVoice) { i -> st.folderOf(i)?.let(::voiceOf) ?: "Нет" },
                 Col("Папка", 40, true) { i -> st.folderOf(i)?.let { Store.relative(it) } },
             ).filter { it.on }
             val head = cols.map { it.title }
@@ -1096,12 +1361,49 @@ object Inventory {
                 p.items.groupBy { it.priority.ifEmpty { "—" } }.entries.sortedWith(compareBy({ it.key.toIntOrNull() ?: Int.MAX_VALUE }, { it.key }))
                     .forEach { (pr, items) -> summary += line("П$pr", items) }
             }
-            // По дням — выезды: сколько предметов впервые снято в тот день и сколько всего к его концу.
-            val byDay = p.items.mapNotNull { i -> st.firstShot(i)?.let { DAY.format(it) to it } }.groupBy({ it.first }, { it.second })
-                .entries.sortedBy { it.value.min() }
-            var sum = 0
-            val days = listOf<List<Any?>>(listOf("День", "Впервые снято предметов", "Всего снято к концу дня")) +
-                byDay.map { (d, v) -> sum += v.size; listOf(d, v.size, sum) }
+            // По дням — выезды: сколько предметов осмотрено впервые в тот день (по снимкам — день
+            // первого снимка; отмеченные вручную — день отметки), сколько снимков сделано и сколько
+            // осмотрено к концу дня. Отмеченное импортом — осмотрено до приложения: строкой сверху.
+            val day = HashMap<String, Long>()  // предмет → когда впервые осмотрен
+            val viaPhotos = HashSet<String>()     // … и по снимкам ли
+            var imported = 0
+            for (i in p.items.filter(st::inspected)) {
+                val k = key(id(i))
+                if (k in day) continue  // один инвентарник в нескольких строках — один предмет
+                val shot = st.folderOf(i)?.let(::shotsOf)?.firstOrNull()
+                when {
+                    shot != null -> { day[k] = shot; viaPhotos += k }
+                    marked[k] != null -> day[k] = marked.getValue(k)
+                    else -> imported++
+                }
+            }
+            fun timeOf(f: File) = seen[Store.relative(f)] ?: f.lastModified()
+            val photosByDay = Store.photoTree(obj).groupBy({ DAY.format(timeOf(it)) }, ::timeOf)
+            val itemsByDay = day.entries.groupBy({ DAY.format(it.value) }, { it.key })
+            // Прочая работа дня — по журналу (автор, 13.10.2026: «Комментарии, голосовые, контакты и т. д.
+            // по дням тоже в отчёты»): в скольких папках писали или правили комментарий и контакты,
+            // сколько голосовых записано (из тех, что лежат сейчас), сколько предметов отмечено нерабочими.
+            fun perDay(what: String, of: (Journal.Entry) -> List<String>) = log.filter { it.what == what && it.sha256.isNotEmpty() }
+                .groupBy({ DAY.format(it.t) }, { it }).mapValues { (_, es) -> es.flatMap(of).toSet().size }
+            val notesByDay = perDay("Комментарий") { listOf(it.file) }
+            val peopleByDay = perDay("Контакты") { listOf(it.file) }
+            val brokenByDay = perDay("Нерабочее") { e -> e.subject.split(", ").map(::key) }
+            val voiceByDay = Store.voiceTree(obj).groupBy { DAY.format(timeOf(it)) }.mapValues { it.value.size }
+            val firstOf = (itemsByDay.mapValues { (_, ks) -> ks.minOf { day.getValue(it) } }.entries + photosByDay.mapValues { it.value.min() }.entries)
+                .groupBy({ it.key }, { it.value }).mapValues { it.value.min() }.toMutableMap()
+            // Дни, когда только писали и записывали, — тоже строкой (время — по журналу).
+            for (e in log) if (e.what in setOf("Комментарий", "Контакты", "Нерабочее", "Голосовая заметка")) firstOf.merge(DAY.format(e.t), e.t, ::minOf)
+            var sum = imported
+            val days = listOf<List<Any?>>(listOf("День", "Осмотрено впервые", "из них по снимкам", "отмечено без снимков", "Снимков сделано",
+                "Всего осмотрено к концу дня", "Комментарии (папок)", "Голосовые", "Контакты (папок)", "Отмечено нерабочими")) +
+                (if (imported > 0) listOf(listOf<Any?>("до приложения (импорт)", imported, 0, imported, 0, imported)) else emptyList()) +
+                firstOf.entries.sortedBy { it.value }.map { (d, _) ->
+                    val ks = itemsByDay[d].orEmpty()
+                    val photo = ks.count { it in viaPhotos }
+                    sum += ks.size
+                    listOf(d, ks.size, photo, ks.size - photo, photosByDay[d]?.size ?: 0, sum,
+                        notesByDay[d] ?: 0, voiceByDay[d] ?: 0, peopleByDay[d] ?: 0, brokenByDay[d] ?: 0)
+                }
             // Нет в описи — папки со снимками, которых в описи нет (излишки, неизвестное).
             val keys = p.items.map { key(id(it)) }.toSet()
             // Папка внутри папки предмета («до ремонта») — часть предмета, её снимки уже у него.
@@ -1109,7 +1411,7 @@ object Inventory {
             val extra = obj.walkTopDown().onEnter { it == obj || !it.name.startsWith(".") && !(it != obj && ofItem(it)) }
                 .filter { it.isDirectory && it != obj }
                 .filter { d -> !ofItem(d) && (d.listFiles()?.any(Store::isPhoto) == true) }
-                .map { d -> listOf<Any?>(d.relativeTo(obj).path, d.listFiles()?.count(Store::isPhoto) ?: 0, Store.note(d)) }.toList()
+                .map { d -> listOf<Any?>(d.relativeTo(obj).path, d.listFiles()?.count(Store::isPhoto) ?: 0, Store.note(d), voiceCount(d)) }.toList()
             // Один инвентарник в нескольких строках описи — один предмет (одна папка, одна отметка);
             // сказать об этом, чтобы повтор в описи не прошёл незамеченным (13.10.2026).
             val repeats = p.items.filter { it.inventory.isNotEmpty() }.groupBy { key(it.inventory) }.filter { it.value.size > 1 }.values
@@ -1118,8 +1420,12 @@ object Inventory {
                 summary += listOf<Any?>("Инвентарник повторяется в описи — считается одним предметом:")
                 repeats.forEach { g -> summary += listOf<Any?>(g.first().inventory, g.joinToString(", ") { "«${it.list}», стр. ${it.row}" }) }
             }
+            // Столбцы указаны вручную — сказать, как именно прочитана опись (проверяющему по отчёту).
+            choicesOf(obj).takeIf { it.sheets.isNotEmpty() }?.let { c ->
+                summary += listOf<Any?>()
+                summary += listOf<Any?>("Опись прочитана с ручным выбором столбцов: " + describe(c))
+            }
             // Журнал: кто и что менял; подпись каждой строки проверена — до первой нарушенной.
-            val log = Journal.entries(obj)
             val check = Journal.verifyQuick(obj)
             summary += listOf<Any?>()
             summary += listOf<Any?>(check.text())
@@ -1131,8 +1437,9 @@ object Inventory {
                 (if (check.problems.isEmpty()) emptyList() else listOf(Xlsx.Out("Сверка файлов",
                     listOf(listOf<Any?>("Файл", "Что не так")) + check.problems.map { listOf<Any?>(it.path, it.kind) }, listOf(70, 24)) { r -> if (r > 0) Xlsx.RED else Xlsx.PLAIN }))
             val book = listOf(Xlsx.Out("Итог", summary, listOf(24, 10, 12, 14, 14, 26, 12))) + sheets +
-                listOf(Xlsx.Out("По дням", days, listOf(14, 24, 22))) +
-                (if (extra.isEmpty()) emptyList() else listOf(Xlsx.Out("Нет в описи", listOf(listOf<Any?>("Папка", "Снимков", "Комментарий")) + extra, listOf(40, 10, 50)))) + journal
+                listOf(Xlsx.Out("По дням", days, listOf(24, 18, 18, 20, 16, 24, 20, 12, 16, 20))) +
+                (if (extra.isEmpty()) emptyList() else listOf(Xlsx.Out("Нет в описи", listOf(listOf<Any?>("Папка", "Снимков", "Комментарий", "Голосовые")) + extra, listOf(40, 10, 50, 16)))) +
+                aboutObject(obj) + journal
             Xlsx.writeBook(reportFile(f), book)
             Store.scan(listOf(reportFile(f)))
         }

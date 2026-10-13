@@ -15,6 +15,8 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.activity.result.contract.ActivityResultContract
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.mutableStateListOf
@@ -59,7 +61,12 @@ class MainActivity : ComponentActivity(), Host {
         Platform.context = applicationContext
         Store.init(File(Environment.getExternalStorageDirectory().absolutePath), File(filesDir.absolutePath))
         take(intent)
-        setContent { OsmotrApp(this, incoming) }
+        // Метки testTag — ещё и resource-id: обход на эмуляторе (tools/matrix) находит блоки по ним.
+        setContent {
+            androidx.compose.foundation.layout.Box(androidx.compose.ui.Modifier.semantics { @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class) testTagsAsResourceId = true }) {
+                OsmotrApp(this@MainActivity, incoming)
+            }
+        }
     }
 
     override fun onNewIntent(intent: Intent) {

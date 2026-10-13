@@ -191,6 +191,7 @@ object Store {
         if (text.isBlank()) f.delete() else writeDurably(f, (text.trim() + "\n").encodeToByteArray())
         scan(listOf(f))
         Journal.add(dir, "Комментарий", relative(dir) + ": " + text.trim().ifEmpty { "удалён" }.take(300), f, gone = text.isBlank())
+        if (text.isBlank()) pruneEmpty(dir)
         changed()
     }
 
@@ -244,6 +245,7 @@ object Store {
         scan(listOf(f))
         Journal.add(dir, "Контакты", relative(dir) + ": " + rows.joinToString("; ") { listOf(it.name, it.phone).filter(String::isNotBlank).joinToString(" ") }.take(300),
             f, gone = rows.isEmpty())
+        if (rows.isEmpty()) pruneEmpty(dir)
         changed()
     }
 
@@ -277,9 +279,12 @@ object Store {
             f to dst
         }
         if (moved.isEmpty()) { bin.deleteRecursively(); return null }
+        // Папка, из которой ушло последнее, — туда же, в корзину: «Вернуть» вернёт и её (с привязкой
+        // к предмету). Родитель — раньше ребёнка: он возвращается целиком, вместе со всем внутри.
+        val pruned = moved.mapNotNull { it.first.parentFile }.distinct().flatMap { pruneEmpty(it, bin) }.reversed()
         scan(gone)
         changed()
-        return Trashed(moved, photos, folders)
+        return Trashed(pruned + moved, photos, folders)
     }
 
     fun restore(t: Trashed) {
@@ -302,6 +307,9 @@ object Store {
         val now = Platform.nowMs()
         trashRoot.listFiles()?.forEach { bin -> bin.name.toLongOrNull()?.let { if (now - it > maxAgeMs) bin.deleteRecursively() } }
     }
+
+    /** Голосовые заметки папки со всей вложенностью. */
+    fun voiceTree(dir: File): List<File> = dir.walkTopDown().onEnter { it == dir || !it.name.startsWith(".") }.filter(::isVoice).toList()
 
     fun photoTree(dir: File): List<File> = dir.walkTopDown().filter(::isPhoto).toList()
 
@@ -348,8 +356,46 @@ object Store {
             if (Inventory.objectOf(oldDir) != Inventory.objectOf(to)) Journal.add(oldDir, "Снимок удалён", what, File(oldDir, f.name), gone = true)
             target
         }
+        photos.mapNotNull { it.parentFile }.distinct().forEach { pruneEmpty(it) }
         scan(photos + moved)
         changed()
+    }
+
+    // ---------- Опустевшая папка ----------
+
+    /**
+     * Пуста ли папка: ни снимков, ни записей, ни комментария, ни контактов, ни вложенных папок —
+     * разве что «Инвентарники.txt» (привязка к предмету: откроют предмет снова — заведётся
+     * снова). Корень и папка описи пустыми не бывают.
+     */
+    fun isEmptyFolder(dir: File): Boolean {
+        if (dir == root || !dir.isDirectory || Inventory.fileIn(dir) != null) return false
+        return dir.listFiles()?.none { f -> !f.name.startsWith(".") && (f.isDirectory || f.name != Inventory.MEMBERS) } ?: false
+    }
+
+    /**
+     * Папка опустела — убрать её, а за ней и опустевших родителей (автор, 13.10.2026: «Если папка
+     * остаётся пустой, её надо удалить. Например, если из неё все комментарии убрали, записи и
+     * т. д.»). В журнал — «папка удалена». [bin] — корзина действия: оставшееся (привязка к
+     * предмету) уходит туда, и «Вернуть» возвращает папку целиком. Убранные — парами «где была → в корзине».
+     */
+    fun pruneEmpty(dir: File, bin: File? = null): List<Pair<File, File>> {
+        val out = mutableListOf<Pair<File, File>>()
+        var d: File = dir
+        while (isEmptyFolder(d)) {
+            val parent = d.parentFile ?: break
+            Journal.add(parent, Journal.FOLDER_DELETED, relative(d) + ": пустая", d, gone = true)
+            if (bin != null) {
+                val dst = File(bin, relative(d)).apply { mkdirs() }
+                d.listFiles()?.forEach { f -> if (!f.isDirectory) f.renameTo(File(dst, f.name)) }
+                out += d to dst
+            }
+            d.deleteRecursively()
+            thumbDir(d).deleteRecursively()
+            changed()
+            d = parent
+        }
+        return out
     }
 
     // ---------- Миниатюры ----------

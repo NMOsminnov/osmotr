@@ -86,7 +86,7 @@ object Journal {
 
     private fun append(obj: File, f: File, what: String, subject: String, path: String, sha: String) {
         val (n, prev) = heads[obj.path] ?: last(f)
-        val e0 = Entry(n + 1, Platform.nowMs(), who(), what, subject, path, sha, hex(Platform.publicKey()), prev)
+        val e0 = Entry(n + 1, now(), who(), what, subject, path, sha, hex(Platform.publicKey()), prev)
         val hash = hex(Platform.sha256(e0.body().encodeToByteArray()))
         val e = e0.copy(hash = hash, sig = hex(Platform.sign(hash.encodeToByteArray())))
         f.appendDurably((json.encodeToString(Entry.serializer(), e) + "\n").encodeToByteArray())
@@ -123,7 +123,7 @@ object Journal {
         .filter { f -> f.isFile && !f.name.startsWith(".") && isTracked(f.name) }.toList()
 
     private fun isTracked(name: String) = name != FILE && !name.startsWith("Осмотр — ") && (
-        name == Store.NOTE || name == Store.CONTACTS || name == Inventory.MEMBERS || name == Inventory.BROKEN || name == Inventory.EARLIER ||
+        name == Store.NOTE || name == Store.CONTACTS || name == Inventory.MEMBERS || name == Inventory.BROKEN || name == Inventory.EARLIER || name == Inventory.COLUMNS ||
             name.startsWith(Inventory.PREFIX) || name.substringAfterLast('.', "").lowercase() in setOf("jpg", "jpeg", "heic", "heif", "m4a"))
 
     /** Отпечаток файла — по памяти, если размер и время не менялись (выгрузка не пересчитывает тысячи снимков). */
@@ -170,6 +170,29 @@ object Journal {
                     if (e.file.isNotEmpty()) state[e.file] = e.sha256
                 }
                 e.file.isNotEmpty() -> if (e.sha256.isEmpty()) state.remove(e.file) else state[e.file] = e.sha256
+            }
+        }
+        return state
+    }
+
+    /**
+     * Когда каждый файл описи впервые лёг в приложение — по журналу (путь → время записи), с
+     * переименованиями и переносами. Время файла на диске для этого не годится: копия через
+     * компьютер или правка мимо приложения его меняют, и снимок 8-го числа попадал в «13-е».
+     */
+    fun firstSeen(list: List<Entry>): Map<String, Long> {
+        val state = LinkedHashMap<String, Long>()
+        fun rename(from: String, to: String) {
+            val moved = state.keys.filter { it == from || it.startsWith("$from/") }
+            moved.forEach { k -> state.remove(k)?.let { v -> state[to + k.removePrefix(from)] = v } }
+        }
+        for (e in list) {
+            when {
+                e.what == BEFORE -> Unit  // до журнала — когда, неизвестно
+                e.what == FOLDER_RENAMED || e.what == FOLDER_MOVED -> e.subject.split(" → ").takeIf { it.size == 2 }?.let { rename(it[0], it[1]) }
+                e.what == FOLDER_DELETED -> state.keys.filter { it == e.file || it.startsWith(e.file + "/") }.forEach { state.remove(it) }
+                e.what == PHOTO_MOVED -> e.subject.split(" → ").takeIf { it.size == 2 }?.let { (from, to) -> state.remove(from)?.let { state[to] = it } }
+                e.file.isNotEmpty() -> if (e.sha256.isEmpty()) state.remove(e.file) else state.getOrPut(e.file) { e.t }
             }
         }
         return state
@@ -253,6 +276,9 @@ object Journal {
     }
 
     /** Забыть, что помнили в памяти (тесты: как после перезапуска). */
+    /** Часы журнала; тест образца отчёта ведёт по ним «три дня работы». */
+    var now: () -> Long = { Platform.nowMs() }
+
     fun forget() = synchronized(lock) { heads.clear(); checked.clear(); hashes.clear(); hashesLoaded = false }
 
     private fun records(n: Int) = when { n % 100 in 11..14 -> "записей"; n % 10 == 1 -> "запись"; n % 10 in 2..4 -> "записи"; else -> "записей" }

@@ -97,6 +97,7 @@ import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.compose.runtime.toMutableStateList
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -540,7 +541,7 @@ private fun ItemCard(items: List<Inventory.Item>, similar: List<Inventory.Item>,
                      leaving: List<String>, shot: (Inventory.Item) -> Boolean, broken: (Inventory.Item) -> Boolean, setBroken: (Inventory.Item, Boolean) -> Unit,
                      earlier: (Inventory.Item) -> Boolean = { false }, setEarlier: (Inventory.Item, Boolean) -> Unit = { _, _ -> }) {
     // Состав меняется плавно: карточка растёт и сжимается, убранный уезжает, а не пропадает.
-    Column(Modifier.fillMaxWidth().panel()
+    Column(Modifier.fillMaxWidth().testTag("карточка предмета").panel()
         .animateContentSize(motion()).padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         // Последний оставшийся — без «убрать»: папка без предмета не бывает.
         val staying = items.count { Inventory.key(Inventory.id(it)) !in leaving }
@@ -562,7 +563,7 @@ private fun ItemCard(items: List<Inventory.Item>, similar: List<Inventory.Item>,
                     FilterChip(off, { haptic.performHapticFeedback(if (off) HapticFeedbackType.ToggleOff else HapticFeedbackType.ToggleOn); setBroken(i, !off) }, {
                         Text(when { off -> "Нерабочее, на списание"; can -> "Отметить: нерабочее"; else -> "Нерабочее — сначала снимки" },
                             color = if (off) BROKEN_RED else Color.Unspecified)
-                    }, enabled = can || off,
+                    }, Modifier.testTag("чип нерабочее"), enabled = can || off,
                         leadingIcon = { Icon(AppIcons.Block, null, Modifier.size(18.dp), tint = if (off) BROKEN_RED else MaterialTheme.colorScheme.onSurfaceVariant) },
                         colors = FilterChipDefaults.filterChipColors(selectedContainerColor = BROKEN_RED.copy(alpha = 0.18f)))
                     // Осмотрено без снимков (импорт или вручную, автор: «отметить как осмотренное — нужна»):
@@ -570,7 +571,7 @@ private fun ItemCard(items: List<Inventory.Item>, similar: List<Inventory.Item>,
                     val mark = earlier(i)
                     if (mark || !can) FilterChip(mark, { haptic.performHapticFeedback(if (mark) HapticFeedbackType.ToggleOff else HapticFeedbackType.ToggleOn); setEarlier(i, !mark) }, {
                         Text(if (mark) "Осмотрено — снять отметку" else "Отметить осмотренным", color = if (mark) DONE_GREEN else Color.Unspecified)
-                    }, leadingIcon = { Icon(if (mark) Icons.Default.Close else Icons.Default.Check, null, Modifier.size(18.dp),
+                    }, Modifier.testTag("чип осмотрено"), leadingIcon = { Icon(if (mark) Icons.Default.Close else Icons.Default.Check, null, Modifier.size(18.dp),
                         tint = if (mark) DONE_GREEN else MaterialTheme.colorScheme.onSurfaceVariant) },
                         colors = FilterChipDefaults.filterChipColors(selectedContainerColor = DONE_GREEN.copy(alpha = 0.16f)))
                 }
@@ -782,7 +783,10 @@ fun ImportDialog(jobs: List<ImportJob>, onClose: () -> Unit) {
                         when (j.state) {
                             ImportJob.State.WAITING -> Text("в очереди", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             ImportJob.State.WORKING -> ParseProgress(null, compact = true, file = j.file ?: File("/нет"))
-                            ImportJob.State.DONE -> Text("✓ ${plural(j.items, "предмет", "предмета", "предметов")}", style = MaterialTheme.typography.bodySmall, color = DONE_GREEN)
+                            // Книга читается, а список сам не нашёлся — опись заведена, столбцы укажут в ней.
+                            ImportJob.State.DONE -> if (j.items == 0) Text("Список сам не нашёлся — откройте опись и укажите столбцы",
+                                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                            else Text("✓ ${plural(j.items, "предмет", "предмета", "предметов")}", style = MaterialTheme.typography.bodySmall, color = DONE_GREEN)
                             ImportJob.State.FAILED -> Text("✗ ${j.error}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
                         }
                     }

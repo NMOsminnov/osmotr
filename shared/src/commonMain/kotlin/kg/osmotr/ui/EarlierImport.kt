@@ -74,7 +74,7 @@ fun EarlierImportScreen(obj: File, fileName: String, sheets: List<Xlsx.Sheet>, o
     val scope = rememberCoroutineScope()
     var sheetIndex by remember { mutableStateOf(0) }
     val sheet = sheets[sheetIndex]
-    val width = remember(sheet) { sheet.rows.maxOfOrNull { it.size } ?: 0 }
+    val width = remember(sheet) { usedWidth(sheet) }
     // Столбец по умолчанию — где больше всего совпадений с описью (в фоне: таблица бывает большой).
     val best by produceState<Int?>(null, sheet) {
         value = withContext(Dispatchers.Default) {
@@ -101,120 +101,61 @@ fun EarlierImportScreen(obj: File, fileName: String, sheets: List<Xlsx.Sheet>, o
     }
 
     Dialog(onDismissRequest = { if (!saving) onClose() }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        Scaffold(
-            topBar = {
-                TopAppBar(
-                    navigationIcon = { IconButton(onClick = onClose, enabled = !saving) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Отмена") } },
-                    title = {
-                        Column {
-                            Text("Импорт осмотренного", maxLines = 1)
-                            Text(fileName, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        }
-                    },
-                )
-            },
-            bottomBar = {
-                Surface(tonalElevation = 3.dp) {
-                    Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        val p = preview
-                        when {
-                            column == null && best == null && width > 0 -> Text("Нажмите столбец, где записаны инвентарные номера.",
-                                style = MaterialTheme.typography.bodyMedium)
-                            p == null -> LinearProgressIndicator(Modifier.fillMaxWidth())
-                            else -> {
-                                Text("Столбец ${letters(column ?: 0)}: в описи нашлось ${p.found.size}" +
-                                    if (p.already > 0) " (уже осмотрено ${p.already})" else "", style = MaterialTheme.typography.titleSmall)
-                                Text(listOfNotNull(
-                                    "не нашлось в описи: ${p.unknown.size}".takeIf { p.unknown.isNotEmpty() },
-                                    "строк-заголовков пропущено: ${p.skipped}".takeIf { p.skipped > 0 },
-                                ).joinToString(" · ").ifEmpty { "Все значения столбца нашлись в описи." },
-                                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                if (p.unknown.isNotEmpty()) Text("Например: " + p.unknown.take(3).joinToString(", ") { "«${it.take(24)}»" },
-                                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2,
-                                    overflow = TextOverflow.Ellipsis)
-                            }
-                        }
-                        Button(
-                            onClick = {
-                                val c = column ?: return@Button
-                                saving = true
-                                scope.launch {
-                                    val r = withContext(Dispatchers.IO) { Inventory.importEarlier(obj, sheet, c, fileName) }
-                                    saving = false
-                                    onDone(r.fresh)
-                                }
-                            },
-                            enabled = !saving && (preview?.fresh ?: 0) > 0,
-                            modifier = Modifier.fillMaxWidth(),
-                        ) {
-                            Text(when {
-                                saving -> "Отмечаем…"
-                                (preview?.fresh ?: 0) > 0 -> "Отметить осмотренными: ${preview!!.fresh}"
-                                preview != null && preview!!.found.isNotEmpty() -> "Всё найденное уже осмотрено"
-                                else -> "Нечего отмечать"
-                            })
-                        }
-                    }
-                }
-            },
-        ) { inner ->
-            Column(Modifier.fillMaxSize().padding(inner)) {
-                if (sheets.size > 1) LazyRow(Modifier.fillMaxWidth().padding(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        TableFrame(
+            title = "Импорт осмотренного", subtitle = fileName, onBack = onClose, backEnabled = !saving,
+            top = {
+                if (sheets.size > 1) LazyRow(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     itemsIndexed(sheets) { i, s ->
                         FilterChip(selected = i == sheetIndex, onClick = { sheetIndex = i }, label = { Text(s.name, maxLines = 1) })
                     }
                 }
-                if (width == 0) {
-                    Box(Modifier.fillMaxSize().padding(32.dp), contentAlignment = Alignment.Center) { Text("Лист пустой.") }
-                    return@Column
-                }
-                val numW = 44.dp; val cellW = 128.dp
-                // Шапка — буквы столбцов; нажатие выбирает столбец.
-                Row(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant)) {
-                    Box(Modifier.width(numW).height(36.dp))
-                    Row(Modifier.horizontalScroll(across)) {
-                        for (c in 0 until width) {
-                            val on = c == column
-                            Box(Modifier.width(cellW).height(36.dp).background(if (on) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant)
-                                .clickable { chosen = c }, contentAlignment = Alignment.Center) {
-                                Text(letters(c), fontWeight = FontWeight.SemiBold,
-                                    color = if (on) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant)
-                            }
-                        }
+            },
+            panel = {
+                val p = preview
+                when {
+                    column == null && best == null && width > 0 -> Text("Нажмите столбец, где записаны инвентарные номера.",
+                        style = MaterialTheme.typography.bodyMedium)
+                    p == null -> LinearProgressIndicator(Modifier.fillMaxWidth())
+                    else -> {
+                        Text("Столбец ${letters(column ?: 0)}: в описи нашлось ${p.found.size}" +
+                            if (p.already > 0) " (уже осмотрено ${p.already})" else "", style = MaterialTheme.typography.titleSmall)
+                        Text(listOfNotNull(
+                            "не нашлось в описи: ${p.unknown.size}".takeIf { p.unknown.isNotEmpty() },
+                            "строк-заголовков пропущено: ${p.skipped}".takeIf { p.skipped > 0 },
+                        ).joinToString(" · ").ifEmpty { "Все значения столбца нашлись в описи." },
+                            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        if (p.unknown.isNotEmpty()) Text("Например: " + p.unknown.take(3).joinToString(", ") { "«${it.take(24)}»" },
+                            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2,
+                            overflow = TextOverflow.Ellipsis)
                     }
                 }
-                HorizontalDivider()
-                LazyColumn(Modifier.fillMaxSize()) {
-                    itemsIndexed(sheet.rows, key = { i, _ -> i }) { r, row ->
-                        val wide = r in sheet.wide
-                        Row(Modifier.fillMaxWidth().height(40.dp)) {
-                            Box(Modifier.width(numW).fillMaxSize().background(MaterialTheme.colorScheme.surfaceVariant), contentAlignment = Alignment.Center) {
-                                Text("${r + 1}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            }
-                            if (wide) {
-                                // Объединено по ширине — заголовок раздела: пропускается.
-                                Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)).padding(horizontal = 10.dp),
-                                    contentAlignment = Alignment.CenterStart) {
-                                    Text("${row.firstOrNull { it.isNotBlank() }.orEmpty()}  · заголовок, пропускается", maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                }
-                            } else Row(Modifier.horizontalScroll(across)) {
-                                for (c in 0 until width) {
-                                    val on = c == column
-                                    Box(Modifier.width(cellW).fillMaxSize()
-                                        .background(if (on) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface)
-                                        .clickable { chosen = c }.padding(horizontal = 8.dp), contentAlignment = Alignment.CenterStart) {
-                                        Text(row.getOrNull(c).orEmpty(), maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall)
-                                    }
-                                }
-                            }
+            },
+            footer = {
+                Button(
+                    onClick = {
+                        val c = column ?: return@Button
+                        saving = true
+                        scope.launch {
+                            val r = withContext(Dispatchers.IO) { Inventory.importEarlier(obj, sheet, c, fileName) }
+                            saving = false
+                            onDone(r.fresh)
                         }
-                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
-                    }
+                    },
+                    enabled = !saving && (preview?.fresh ?: 0) > 0,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(when {
+                        saving -> "Отмечаем…"
+                        (preview?.fresh ?: 0) > 0 -> "Отметить осмотренными: ${preview!!.fresh}"
+                        preview != null && preview!!.found.isNotEmpty() -> "Всё найденное уже осмотрено"
+                        else -> "Нечего отмечать"
+                    })
                 }
-            }
+            },
+        ) { m ->
+            if (width == 0) Box(m.fillMaxSize().padding(32.dp), contentAlignment = Alignment.Center) { Text("Лист пустой.") }
+            // Строки, объединённые по ширине, — заголовки разделов: пропускаются.
+            else SheetGrid(sheet, width, across, selected = column, modifier = m, wideNote = "заголовок, пропускается", onColumn = { chosen = it })
         }
     }
 }
