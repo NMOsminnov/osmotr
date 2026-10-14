@@ -3,8 +3,18 @@ package kg.osmotr.ui
 import androidx.compose.runtime.staticCompositionLocalOf
 import kg.osmotr.core.File
 
-/** Присланный или выбранный файл: имя и содержимое. */
-class Picked(val name: String, val bytes: ByteArray)
+/** Присланный или выбранный файл: имя, содержимое; [takenMs] — когда снято (фото: EXIF), если известно. */
+class Picked(val name: String, val bytes: ByteArray, val takenMs: Long? = null) {
+    /** Фото (по расширению или по началу файла): JPEG, HEIC/HEIF, PNG, WebP. */
+    val isPhoto: Boolean get() {
+        if (name.substringAfterLast('.', "").lowercase() in setOf("jpg", "jpeg", "heic", "heif", "png", "webp")) return true
+        val b = bytes
+        return b.size > 12 && (b[0] == 0xFF.toByte() && b[1] == 0xD8.toByte() ||
+            b[0] == 0x89.toByte() && b[1] == 'P'.code.toByte() ||
+            b[4] == 'f'.code.toByte() && b[5] == 't'.code.toByte() && b[6] == 'y'.code.toByte() && b[7] == 'p'.code.toByte() ||
+            b[0] == 'R'.code.toByte() && b[1] == 'I'.code.toByte() && b[8] == 'W'.code.toByte() && b[9] == 'E'.code.toByte())
+    }
+}
 
 /** Снято штатной камерой: куда и сколько. */
 class Shot(val dir: File, val count: Int)
@@ -24,6 +34,10 @@ interface Host {
     fun requestStorage()
     /** Выбрать книгу(и) Excel. */
     fun pickBooks(multiple: Boolean, got: (List<Picked>) -> Unit)
+    /** Есть ли выбор фото из галереи (пока — Android). */
+    val canPickGallery: Boolean get() = false
+    /** Выбрать фото из галереи — несколько сразу. */
+    fun pickGallery(got: (List<Picked>) -> Unit) {}
     /** Отправить файлы через «Поделиться» (мессенджер, почта, «Файлы»). */
     fun share(files: List<File>, mime: String, title: String = "Отправить")
     /** Короткое сообщение внизу экрана. */

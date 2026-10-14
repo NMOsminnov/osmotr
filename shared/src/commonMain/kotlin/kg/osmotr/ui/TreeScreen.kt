@@ -2,6 +2,8 @@
 
 package kg.osmotr.ui
 
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.Dispatchers
 import kg.osmotr.core.File
 import kg.osmotr.core.Inventory
 import kg.osmotr.core.Platform
@@ -45,7 +47,8 @@ import kotlinx.coroutines.launch
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun TreeScreen(current: File, open: (File) -> Unit, close: () -> Unit) {
+fun TreeScreen(current: File, open: (File) -> Unit, close: () -> Unit, place: List<Picked>? = null) {
+    val host = LocalHost.current
     var allOpen by rememberSaveable { mutableStateOf(true) }
     val selected = remember { mutableStateListOf<File>() }
     val snackbar = remember { SnackbarHostState() }
@@ -71,7 +74,7 @@ fun TreeScreen(current: File, open: (File) -> Unit, close: () -> Unit) {
                 title = { Text("Отмечено: ${plural(selected.size, "папка", "папки", "папок")}", maxLines = 1) },
             ) else TopAppBar(
                 navigationIcon = { IconButton(onClick = close) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Назад") } },
-                title = { Text("Структура") },
+                title = { Text(if (place == null) "Структура" else "Куда положить: ${plural(place.size, "фото", "фото", "фото")}", maxLines = 1) },
                 actions = {
                     IconButton(onClick = { allOpen = !allOpen }) {
                         Icon(if (allOpen) AppIcons.UnfoldLess else AppIcons.UnfoldMore, if (allOpen) "Свернуть всё" else "Раскрыть всё")
@@ -80,7 +83,18 @@ fun TreeScreen(current: File, open: (File) -> Unit, close: () -> Unit) {
             )
         },
     ) { inner ->
-        FolderTree(current = current, onPick = open, allOpen = allOpen, onMove = move, selected = selected,
+        // Присланные фото: касание папки — положить туда снимками и открыть её.
+        val pick: (File) -> Unit = if (place == null) open else { dir ->
+            if (dir == Store.root) host.toast("Выберите папку — в «Осмотры» напрямую фото не кладутся")
+            else scope.launch {
+                val n = withContext(Dispatchers.IO) {
+                    Store.addPhotos(dir, place.map { Triple(it.name, it.bytes, it.takenMs) }).also { Inventory.refreshReportSoon(dir) }.size
+                }
+                host.toast("Добавлено в «${dir.name}»: ${plural(n, "фото", "фото", "фото")}")
+                open(dir)
+            }
+        }
+        FolderTree(current = current, onPick = pick, allOpen = allOpen, onMove = if (place == null) move else null, selected = selected,
             modifier = Modifier.fillMaxSize().padding(inner))
     }
 }

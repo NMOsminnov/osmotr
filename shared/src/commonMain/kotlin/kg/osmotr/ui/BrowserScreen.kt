@@ -310,13 +310,35 @@ fun BrowserScreen(
                     text = { Text("Новая опись", fontWeight = FontWeight.SemiBold) },
                     containerColor = MaterialTheme.colorScheme.primary,
                     contentColor = Color.White,
-                ) else ExtendedFloatingActionButton(
-                    onClick = { camera(dir) },
-                    icon = { Icon(AppIcons.CameraAlt, null) },
-                    text = { Text("Снимать", fontWeight = FontWeight.SemiBold) },
-                    containerColor = MaterialTheme.colorScheme.primary,
-                    contentColor = Color.White,
-                )
+                ) else Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    // Фото из галереи — выбранные, сразу несколько, снимками в эту папку (автор, 14.10.2026:
+                    // «Нужно уметь подгружать файлы из галереи. Выбранные файлы»; пока — Android).
+                    if (host.canPickGallery) ExtendedFloatingActionButton(
+                        onClick = {
+                            host.pickGallery { got ->
+                                if (got.isEmpty()) return@pickGallery
+                                scope.launch {
+                                    val n = withContext(Dispatchers.IO) {
+                                        Store.addPhotos(dir, got.map { Triple(it.name, it.bytes, it.takenMs) }).also { Inventory.refreshReportSoon(dir) }.size
+                                    }
+                                    host.toast("Добавлено из галереи: ${plural(n, "фото", "фото", "фото")}")
+                                }
+                            }
+                        },
+                        icon = { Icon(AppIcons.PhotoLibrary, null) },
+                        text = { Text("Из галереи") },
+                        containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                        modifier = Modifier.testTag("из галереи"),
+                    )
+                    ExtendedFloatingActionButton(
+                        onClick = { camera(dir) },
+                        icon = { Icon(AppIcons.CameraAlt, null) },
+                        text = { Text("Снимать", fontWeight = FontWeight.SemiBold) },
+                        containerColor = MaterialTheme.colorScheme.primary,
+                        contentColor = Color.White,
+                    )
+                }
             }
         },
     ) { inner ->

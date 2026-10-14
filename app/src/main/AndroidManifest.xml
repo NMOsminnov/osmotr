@@ -47,6 +47,13 @@
                 <data android:mimeType="application/vnd.ms-excel" />
                 <data android:mimeType="application/octet-stream" />
             </intent-filter>
+            <!-- Фото из WhatsApp, Telegram, галереи: «Поделиться» → «Осмотр» → выбрать папку (14.10.2026). -->
+            <intent-filter android:label="Добавить фото в «Осмотр»">
+                <action android:name="android.intent.action.SEND" />
+                <action android:name="android.intent.action.SEND_MULTIPLE" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="image/*" />
+            </intent-filter>
             <!-- «Открыть с помощью» из файлов и мессенджеров. -->
             <intent-filter android:label="Добавить опись">
                 <action android:name="android.intent.action.VIEW" />

@@ -68,7 +68,8 @@ object Store {
     fun isPhoto(name: String, m: okio.FileMetadata) = m.isRegularFile && !name.startsWith(".") && (m.size ?: 0) > 0 &&
         name.substringAfterLast('.', "").lowercase() in PHOTO_EXT
 
-    private val PHOTO_EXT = setOf("jpg", "jpeg", "heic", "heif")
+    // PNG и WebP — из галереи и мессенджеров (снимки экрана, присланное в WhatsApp), 14.10.2026.
+    val PHOTO_EXT = setOf("jpg", "jpeg", "heic", "heif", "png", "webp")
 
     /** Снимки папки — новые первыми, как в галерее: вернулся с камеры — снятое сразу на виду. */
     fun photosIn(dir: File): List<File> =
@@ -339,6 +340,31 @@ object Store {
         changed()
     }
     fun saved(photo: File) = saved(listOf(photo))
+
+    /**
+     * Фото со стороны (галерея, «Поделиться» из WhatsApp) — снимками в папку [dir]: имя по тому же
+     * правилу, что у камеры, время — когда снято ([takenMs] из EXIF), иначе — сейчас; в журнал и
+     * миниатюры — как снятое камерой ([saved]). [items] — пары: имя (для расширения), байты, время.
+     */
+    fun addPhotos(dir: File, items: List<Triple<String, ByteArray, Long?>>): List<File> {
+        val out = items.map { (name, bytes, taken) ->
+            val ext = name.substringAfterLast('.', "").lowercase().let { if (it == "jpeg") "jpg" else it }.takeIf { it in PHOTO_EXT } ?: sniff(bytes)
+            val f = newPhotoFile(dir, ext, taken ?: Platform.nowMs())
+            writeDurably(f, bytes)
+            f
+        }
+        saved(out)
+        changed()
+        return out
+    }
+
+    /** Расширение по началу файла: имя не сказало (мессенджеры шлют без него). */
+    private fun sniff(b: ByteArray): String = when {
+        b.size > 3 && b[0] == 0x89.toByte() && b[1] == 'P'.code.toByte() -> "png"
+        b.size > 11 && b[8] == 'W'.code.toByte() && b[9] == 'E'.code.toByte() -> "webp"
+        b.size > 11 && b[4] == 'f'.code.toByte() && b[5] == 't'.code.toByte() -> "heic"
+        else -> "jpg"
+    }
 
     /** Перенести снимки в папку; имя занято — с номером. */
     fun move(photos: Collection<File>, to: File) {

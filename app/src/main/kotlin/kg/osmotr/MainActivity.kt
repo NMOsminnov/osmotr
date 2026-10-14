@@ -46,6 +46,14 @@ class MainActivity : ComponentActivity(), Host {
     private var gotBooks: ((List<Picked>) -> Unit)? = null
     private val openOne = registerForActivityResult(ActivityResultContracts.OpenDocument()) { u -> gotBooks?.invoke(listOfNotNull(u).mapNotNull(::read)); gotBooks = null }
     private val openMany = registerForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { us -> gotBooks?.invoke(us.mapNotNull(::read)); gotBooks = null }
+    // Фото из галереи — системный выбор (Photo Picker): несколько сразу, разрешений на память не надо.
+    private var gotGallery: ((List<Picked>) -> Unit)? = null
+    private val gallery = registerForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(100)) { us ->
+        val got = gotGallery; gotGallery = null
+        if (got == null || us.isEmpty()) return@registerForActivityResult
+        // Читать — в фоне: два десятка снимков по 4 МБ на главном потоке подвесили бы экран.
+        Thread { val list = us.mapNotNull(::read); runOnUiThread { got(list) } }.start()
+    }
     private var gotPhone: ((String, String) -> Unit)? = null
     private val phone = registerForActivityResult(PickPhone) { uri ->
         uri ?: return@registerForActivityResult
@@ -98,8 +106,10 @@ class MainActivity : ComponentActivity(), Host {
         }
         // Некоторые мессенджеры кладут файлы только в clipData.
         if (got.isEmpty()) intent.clipData?.let { c -> (0 until c.itemCount).mapNotNullTo(got) { c.getItemAt(it).uri } }
-        incoming.addAll(got.distinct().mapNotNull(::read))
         intent.action = null  // поворот / возврат не загружает второй раз
+        // Читать — в фоне (фото из WhatsApp — по нескольку мегабайт).
+        val uris = got.distinct()
+        Thread { val list = uris.mapNotNull(::read); runOnUiThread { incoming.addAll(list) } }.start()
     }
 
     /** Файл по ссылке: имя (мессенджер не сказал — пусто, имя описи тогда — из книги) и содержимое. */
@@ -107,7 +117,14 @@ class MainActivity : ComponentActivity(), Host {
         val name = contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
             if (c.moveToFirst()) c.getString(0) else null
         } ?: uri.lastPathSegment?.substringAfterLast('/')?.takeIf { '.' in it } ?: ""
-        Picked(name, contentResolver.openInputStream(uri)!!.use { it.readBytes() })
+        val bytes = contentResolver.openInputStream(uri)!!.use { it.readBytes() }
+        Picked(name, bytes, takenOf(bytes))
+    }.getOrNull()
+
+    /** Когда снято — из EXIF (DateTimeOriginal, иначе DateTime); не фото или нет даты — null. */
+    private fun takenOf(bytes: ByteArray): Long? = runCatching {
+        val exif = androidx.exifinterface.media.ExifInterface(java.io.ByteArrayInputStream(bytes))
+        exif.dateTimeOriginal ?: exif.dateTime
     }.getOrNull()
 
     // ---------- Host ----------
@@ -135,6 +152,13 @@ class MainActivity : ComponentActivity(), Host {
             runCatching { startActivity(Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION, Uri.parse("package:$packageName"))) }
                 .onFailure { startActivity(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION)) }
         } else legacyStorage.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+    }
+
+    override val canPickGallery: Boolean get() = true
+
+    override fun pickGallery(got: (List<Picked>) -> Unit) {
+        gotGallery = got
+        gallery.launch(androidx.activity.result.PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
     }
 
     override fun pickBooks(multiple: Boolean, got: (List<Picked>) -> Unit) {

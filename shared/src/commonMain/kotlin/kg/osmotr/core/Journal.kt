@@ -124,7 +124,7 @@ object Journal {
 
     private fun isTracked(name: String) = name != FILE && !name.startsWith("Осмотр — ") && (
         name == Store.NOTE || name == Store.CONTACTS || name == Inventory.MEMBERS || name == Inventory.BROKEN || name == Inventory.EARLIER || name == Inventory.COLUMNS ||
-            name.startsWith(Inventory.PREFIX) || name.substringAfterLast('.', "").lowercase() in setOf("jpg", "jpeg", "heic", "heif", "m4a"))
+            name.startsWith(Inventory.PREFIX) || name.substringAfterLast('.', "").lowercase() in Store.PHOTO_EXT + "m4a")
 
     /** Отпечаток файла — по памяти, если размер и время не менялись (выгрузка не пересчитывает тысячи снимков). */
     fun hashOf(f: File, fresh: Boolean = false): String {

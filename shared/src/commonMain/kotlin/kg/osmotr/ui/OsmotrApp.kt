@@ -57,7 +57,8 @@ sealed interface Screen {
     data class Viewer(val dir: File, val start: File) : Screen
     data class Search(val here: File, val query: String? = null) : Screen
     data class Contacts(val dir: File) : Screen
-    data class Tree(val here: File) : Screen
+    /** [place] — присланные фото («Поделиться» из WhatsApp): выбрать папку, куда их положить. */
+    data class Tree(val here: File, val place: List<Picked>? = null) : Screen
     /** [into] — набираем предметы в эту папку (касание — добавить/убрать). */
     data class Inventory(val obj: File, val into: File? = null, val query: String? = null) : Screen
 }
@@ -92,7 +93,10 @@ private fun Body(host: Host, incoming: SnapshotStateList<Picked>, start: List<Sc
         if (incoming.isEmpty()) return@LaunchedEffect
         val got = incoming.toList(); incoming.clear()
         while (stack.size > 1) stack.removeAt(stack.lastIndex)
-        InventoryImport.start(host, scope, got) { stack.add(Screen.Inventory(it)) }
+        // Фото (WhatsApp, галерея через «Поделиться») — спросить папку; книги — описями.
+        val (photos, books) = got.partition { it.isPhoto }
+        if (books.isNotEmpty()) InventoryImport.start(host, scope, books) { stack.add(Screen.Inventory(it)) }
+        if (photos.isNotEmpty()) stack.add(Screen.Tree(Store.root, place = photos))
     }
     if (InventoryImport.jobs.isNotEmpty()) ImportDialog(InventoryImport.jobs, onClose = { InventoryImport.jobs.clear() })
     val snackbar = remember { SnackbarHostState() }
@@ -201,7 +205,7 @@ private fun Body(host: Host, incoming: SnapshotStateList<Picked>, start: List<Sc
                 // Папка после набора могла переименоваться — вернуться в неё по новому имени.
                 picked = { dir -> pop(); replaceTop(Screen.Browser(dir)) },
                 contacts = { push(Screen.Contacts(it)) })
-            is Screen.Tree -> TreeScreen(current = top.here, open = { replaceTop(Screen.Browser(it)) }, close = { pop() })
+            is Screen.Tree -> TreeScreen(current = top.here, place = top.place, open = { replaceTop(Screen.Browser(it)) }, close = { pop() })
             is Screen.Contacts -> ContactsScreen(dir = top.dir, close = { pop() })
             is Screen.Viewer -> ViewerScreen(dir = top.dir, start = top.start, close = { pop() })
         }
