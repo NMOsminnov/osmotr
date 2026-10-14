@@ -43,6 +43,7 @@ import kotlinx.cinterop.reinterpret
 import kotlinx.cinterop.sizeOf
 import kotlinx.cinterop.usePinned
 import kotlinx.cinterop.useContents
+import kotlinx.cinterop.toKString
 import okio.FileSystem
 import okio.Path.Companion.toPath
 import okio.buffer
@@ -206,5 +207,18 @@ actual object Platform {
     }
 
     actual fun deviceName(): String = platform.UIKit.UIDevice.currentDevice.model
+
+    actual fun appVersion(): String {
+        val info = platform.Foundation.NSBundle.mainBundle.infoDictionary
+        return "${info?.get("CFBundleShortVersionString") ?: "?"} (${info?.get("CFBundleVersion") ?: "?"})"
+    }
+    actual fun osVersion(): String = "iOS " + platform.UIKit.UIDevice.currentDevice.systemVersion
+    /** Модель железа — «iPhone15,2» (uname): «iPhone» из UIDevice по ней не различить. */
+    @OptIn(ExperimentalForeignApi::class)
+    actual fun hardware(): String = kotlinx.cinterop.memScoped {
+        val u = kotlinx.cinterop.alloc<platform.posix.utsname>()
+        platform.posix.uname(u.ptr)
+        u.machine.toKString()
+    }
 
 }

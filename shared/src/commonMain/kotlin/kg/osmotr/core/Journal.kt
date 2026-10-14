@@ -75,7 +75,7 @@ object Journal {
                 if (!f.isFile) baseline(obj, f, except = path)
                 append(obj, f, what, subject, path, sha)
             }
-        }.onFailure { Platform.log("журнал: не записали «$what» — ${it.message}") }
+        }.onFailure { Telemetry.error("журнал: не записали «$what»", it) }
     }
 
     /** Первая строка журнала описи: что уже лежало (снятое до журнала) — одной записью, без отпечатков. */

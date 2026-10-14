@@ -68,5 +68,8 @@ actual object Platform {
     private fun keyPair(): java.security.KeyPair = pair
 
     actual fun deviceName(): String = "Компьютер (тесты)"
+    actual fun appVersion(): String = "тесты"
+    actual fun osVersion(): String = System.getProperty("os.name") + " " + System.getProperty("os.version")
+    actual fun hardware(): String = "JVM " + System.getProperty("java.version")
 
 }

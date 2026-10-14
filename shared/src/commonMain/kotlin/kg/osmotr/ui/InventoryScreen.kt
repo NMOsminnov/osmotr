@@ -168,7 +168,7 @@ fun InventoryScreen(obj: File, into: File? = null, initialQuery: String? = null,
         value?.let { d -> withContext(Dispatchers.Default) {
             val t0 = Platform.nowMs(); val items = d.parsed.flatMap { it.items }
             Search.prepare(items)
-            Platform.log("поиск готов: ${items.size} предметов, ${Platform.nowMs() - t0} мс")
+            kg.osmotr.core.Telemetry.log("поиск готов: ${items.size} предметов, ${Platform.nowMs() - t0} мс")
         } }
     }
     fun d0() = data
@@ -312,7 +312,8 @@ fun InventoryScreen(obj: File, into: File? = null, initialQuery: String? = null,
             val match = Search.matcher(q)
             items = items.mapNotNull { i -> ensureActive(); match(i).takeIf { it > 0 }?.let { i to it } }
                 .sortedByDescending { it.second }.map { it.first }
-            Platform.log("поиск «$q»: ${items.size} из ${all.size}, ${Platform.nowMs() - t0} мс")
+            // Что искали — не пишется (в поиске и люди, и телефоны): только длина запроса.
+            kg.osmotr.core.Telemetry.log("поиск (${q.length} зн.): ${items.size} из ${all.size}, ${Platform.nowMs() - t0} мс")
         } else items = when (v.sort) {
             Sort.NUMBER -> items
             Sort.PRIORITY -> items.sortedWith(compareBy<Inventory.Item> { it.priority.toIntOrNull() ?: Int.MAX_VALUE }.thenBy { it.number.toIntOrNull() ?: 0 })

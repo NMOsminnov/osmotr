@@ -32,6 +32,8 @@ private fun startScreens(): List<Screen> {
     fun arg(name: String) = args.indexOf("-$name").takeIf { it >= 0 }?.let { args.getOrNull(it + 1) }
     // Самопроверка журнала (подпись и отпечатки на этом iPhone) — итог в системный журнал, его читает CI.
     if ("-selftest" in args) kg.osmotr.core.Platform.log(kg.osmotr.core.Journal.selfTest())
+    // Проверка перехвата падений (CI): падение нарочно — файл падения должен лечь в телеметрию.
+    if ("-crashtest" in args) throw IllegalStateException("проверка падения: телеметрия, почта test@example.com, телефон +996 555 123 456")
     val kind = arg("screen") ?: return emptyList()
     val path = arg("path")?.let { File(Store.root, it) } ?: Store.root
     return when (kind) {
@@ -45,6 +47,18 @@ private fun startScreens(): List<Screen> {
     }
 }
 
+/** Необработанная ошибка Kotlin — файлом в телеметрию, затем как обычно: процесс заканчивается. */
+@OptIn(kotlin.experimental.ExperimentalNativeApi::class)
+private fun hookCrashes() {
+    kotlin.native.setUnhandledExceptionHook { e ->
+        kg.osmotr.core.Telemetry.crash(e)
+        kotlin.native.terminateWithUnhandledException(e)
+    }
+}
+
+/** Папка телеметрии — для обёртки на Swift (MetricKit кладёт туда отчёты системы). */
+fun telemetryDir(): String = kg.osmotr.core.Telemetry.dir().path
+
 /**
  * Вход для iPhone (Swift-обёртка показывает этот контроллер). «Осмотры» — в папке приложения:
  * видна в «Файлах» («На iPhone → Осмотр») и через кабель на компьютере.
@@ -53,6 +67,9 @@ fun MainViewController(): platform.UIKit.UIViewController {
     val docs = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, true).first() as String
     val support = NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory, NSUserDomainMask, true).first() as String
     Store.init(File(docs), File(support))
+    // Телеметрия: сеанс и падение Kotlin — файлом в момент сбоя; отчёты системы (MetricKit) пишет Swift.
+    kg.osmotr.core.Telemetry.start("iPhone", kg.osmotr.core.Platform.appVersion(), kg.osmotr.core.Platform.osVersion(), kg.osmotr.core.Platform.hardware())
+    hookCrashes()
     val start = startScreens()
     return ComposeUIViewController { OsmotrApp(IosHost, incoming, start) }
 }

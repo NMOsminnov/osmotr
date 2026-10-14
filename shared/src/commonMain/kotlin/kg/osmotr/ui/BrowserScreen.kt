@@ -52,6 +52,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
@@ -163,6 +164,7 @@ fun BrowserScreen(
     }
     LaunchedEffect(card) { card?.items?.map { Inventory.key(Inventory.id(it)) }?.toSet()?.let { here -> leaving.retainAll(here) } }
     var zipping by remember { mutableStateOf<Float?>(null) }
+    var diagnostics by remember { mutableStateOf(false) }
     var zipError by remember { mutableStateOf<String?>(null) }
     // Новые описи: сразу несколько файлов, каждый — своя опись, без вопросов (та же загрузка,
     // что из «Поделиться» в мессенджере — InventoryImport).
@@ -267,6 +269,9 @@ fun BrowserScreen(
                                 DropdownMenuItem({ Text("Новая папка") }, leadingIcon = { Icon(AppIcons.CreateNewFolder, null) }, onClick = { menu = false; newFolder = true })
                                 DropdownMenuItem({ Text("Структура") }, leadingIcon = { Icon(AppIcons.AccountTree, null) }, onClick = { menu = false; tree() })
                             }
+                            // Журнал работы и отчёты о сбоях — для разбора ошибок, без личного (Diagnostics.kt).
+                            if (dir == Store.root) DropdownMenuItem({ Text("Диагностика") }, leadingIcon = { Icon(Icons.Default.Info, null) },
+                                onClick = { menu = false; diagnostics = true })
                             DropdownMenuItem({ Text("Отправить архивом") }, leadingIcon = { Icon(Icons.Default.Share, null) }, onClick = {
                                 menu = false
                                 scope.launch {
@@ -407,6 +412,7 @@ fun BrowserScreen(
         }
     }
 
+    if (diagnostics) DiagnosticsDialog(onClose = { diagnostics = false })
     zipError?.let { e ->
         AlertDialog(onDismissRequest = { zipError = null }, title = { Text("Архив не отправлен") },
             text = { Text("Сборка не удалась: $e. Проверьте свободную память телефона.") },
@@ -743,9 +749,14 @@ object InventoryImport {
                     gate.acquire()
                     try {
                         job.state = ImportJob.State.WORKING
+                        val t0 = kg.osmotr.core.Platform.nowMs()
                         withContext(Dispatchers.IO) { runCatching { Inventory.importBook(book.bytes, book.name) { job.file = it } } }
                             .onSuccess { job.items = it.items.size; job.dir = job.file?.parentFile; job.state = ImportJob.State.DONE }
                             .onFailure { job.error = it.message ?: "не получилось"; job.state = ImportJob.State.FAILED }
+                        // Причина отказа — текст приложения (без имён); имя файла — нет.
+                        kg.osmotr.core.Telemetry.event("загрузка описи", if (job.state == ImportJob.State.DONE)
+                            "${job.items} предметов, ${book.bytes.size / 1024} КБ, ${kg.osmotr.core.Platform.nowMs() - t0} мс"
+                            else "отказ — ${job.error.substringBefore("«")}")
                     } finally { gate.release() }
                 }
             }.forEach { it.join() }

@@ -930,7 +930,8 @@ object Inventory {
         val items = read(sheets, choicesOf(f.parentFile!!)).items; lap("столбцы и предметы")
         tell(f, 0.97f, "Собираем список: ${items.size} предметов")
         runCatching { cache.parentFile?.mkdirs(); cache.writeText(json.encodeToString(Cached.serializer(), Cached(items))) }; lap("кэш")
-        Platform.log("разбор ${f.name}: ${items.size} предметов, мс:$times")
+        // Имя описи — отпечатком: в телеметрию имена не идут.
+        Telemetry.log("разбор описи ${Telemetry.id(f.name)}: ${items.size} предметов, ${book.size / 1024} КБ, мс:$times")
         return Parsed(f, items)
     }
 
@@ -1392,7 +1393,7 @@ object Inventory {
             val firstOf = (itemsByDay.mapValues { (_, ks) -> ks.minOf { day.getValue(it) } }.entries + photosByDay.mapValues { it.value.min() }.entries)
                 .groupBy({ it.key }, { it.value }).mapValues { it.value.min() }.toMutableMap()
             // Дни, когда только писали и записывали, — тоже строкой (время — по журналу).
-            for (e in log) if (e.what in setOf("Комментарий", "Контакты", "Нерабочее", "Голосовая заметка")) firstOf.merge(DAY.format(e.t), e.t, ::minOf)
+            for (e in log) if (e.what in setOf("Комментарий", "Контакты", "Нерабочее", "Голосовая заметка")) DAY.format(e.t).let { d -> firstOf[d] = minOf(firstOf[d] ?: e.t, e.t) }
             var sum = imported
             val days = listOf<List<Any?>>(listOf("День", "Осмотрено впервые", "из них по снимкам", "отмечено без снимков", "Снимков сделано",
                 "Всего осмотрено к концу дня", "Комментарии (папок)", "Голосовые", "Контакты (папок)", "Отмечено нерабочими")) +
@@ -1468,7 +1469,7 @@ object Inventory {
                 // Серия снимков — одна пересборка: ждём, пока правки утихнут.
                 kotlinx.coroutines.delay(REPORT_QUIET_MS)
                 kotlinx.atomicfu.locks.synchronized(reportsLock) { reports[k] = false }
-                val ok = runCatching { writeReport(obj) }.isSuccess
+                val ok = runCatching { writeReport(obj) }.onFailure { Telemetry.error("отчёт описи ${Telemetry.id(obj.name)}", it) }.isSuccess
                 val again = kotlinx.atomicfu.locks.synchronized(reportsLock) {
                     if (reports[k] == true) true
                     else { if (ok) staleMark(obj).delete(); reports.remove(k); false }

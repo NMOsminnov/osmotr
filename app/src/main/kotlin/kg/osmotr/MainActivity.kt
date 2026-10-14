@@ -34,6 +34,9 @@ import kg.osmotr.ui.Shot
  * Android-часть «Осмотра»: всё приложение — общее (shared, то же на iPhone), здесь только то,
  * что умеет одна платформа: штатная камера, выбор файлов, «Поделиться», контакты, доступ к памяти.
  */
+/** Перехватчик падений ставится один раз на процесс (активность пересоздаётся). */
+private var crashHooked = false
+
 class MainActivity : ComponentActivity(), Host {
     /** Описи, присланные через «Поделиться» / «Открыть с помощью». */
     private val incoming = mutableStateListOf<Picked>()
@@ -60,6 +63,13 @@ class MainActivity : ComponentActivity(), Host {
         enableEdgeToEdge()
         Platform.context = applicationContext
         Store.init(File(Environment.getExternalStorageDirectory().absolutePath), File(filesDir.absolutePath))
+        // Телеметрия: сеанс (версия, система, модель) и падение — файлом в момент сбоя (Telemetry.kt).
+        kg.osmotr.core.Telemetry.start("Android", Platform.appVersion(), Platform.osVersion(), Platform.hardware())
+        if (!crashHooked) {
+            crashHooked = true
+            val prior = Thread.getDefaultUncaughtExceptionHandler()
+            Thread.setDefaultUncaughtExceptionHandler { t, e -> kg.osmotr.core.Telemetry.crash(e); prior?.uncaughtException(t, e) }
+        }
         take(intent)
         // Метки testTag — ещё и resource-id: обход на эмуляторе (tools/matrix) находит блоки по ним.
         setContent {

@@ -101,4 +101,13 @@ actual object Platform {
 
     actual fun deviceName(): String = listOf(android.os.Build.MANUFACTURER, android.os.Build.MODEL).filter { it.isNotBlank() }.distinct().joinToString(" ")
 
+    actual fun appVersion(): String = runCatching {
+        val c = context!!
+        val i = c.packageManager.getPackageInfo(c.packageName, 0)
+        @Suppress("DEPRECATION") val code = if (android.os.Build.VERSION.SDK_INT >= 28) i.longVersionCode else i.versionCode.toLong()
+        "${i.versionName} ($code)"
+    }.getOrDefault("?")
+    actual fun osVersion(): String = "Android ${android.os.Build.VERSION.RELEASE} (API ${android.os.Build.VERSION.SDK_INT})"
+    actual fun hardware(): String = deviceName()
+
 }

@@ -37,4 +37,12 @@ expect object Platform {
     fun verify(publicKey: ByteArray, data: ByteArray, signature: ByteArray): Boolean
     /** Модель телефона — «кто» в журнале, если человек не назвался. */
     fun deviceName(): String
+
+    // Телеметрия (Telemetry): что за приложение и на чём — без личного.
+    /** Версия приложения: «3.4 (11)». */
+    fun appVersion(): String
+    /** Система: «iOS 18.2», «Android 15 (API 35)». */
+    fun osVersion(): String
+    /** Модель железа: «iPhone15,2», «samsung SM-A546E». */
+    fun hardware(): String
 }

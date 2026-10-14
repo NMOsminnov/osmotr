@@ -40,6 +40,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kg.osmotr.core.File
 import kg.osmotr.core.Inventory
 import kg.osmotr.core.Store
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.IO
 import kotlinx.coroutines.launch
@@ -100,9 +101,9 @@ private fun Body(host: Host, incoming: SnapshotStateList<Picked>, start: List<Sc
         // исчезнувшую — сменить ближайшей существующей.
         Store.changed()
         // Описи кучей в одной папке или прямо в корне (прежние версии, файлы по USB) — по своим папкам.
-        scope.launch(Dispatchers.IO) { runCatching { Inventory.migrate() } }
+        scope.launch(Dispatchers.IO) { runCatching { Inventory.migrate() }.onFailure { kg.osmotr.core.Telemetry.error("перенос описей", it) } }
         // Отчёты, которые не успели собраться до закрытия, — собрать (отчёт в папке держим свежим).
-        scope.launch(Dispatchers.IO) { runCatching { Inventory.resumeReports() } }
+        scope.launch(Dispatchers.IO) { runCatching { Inventory.resumeReports() }.onFailure { kg.osmotr.core.Telemetry.error("отчёты при запуске", it) } }
         while (stack.size > 1 && stack.last().let { it is Screen.Browser && !it.dir.isDirectory }) stack.removeAt(stack.lastIndex)
         (stack.last() as? Screen.Browser)?.let { top ->
             if (!top.dir.isDirectory) stack[stack.lastIndex] = Screen.Browser(generateSequence(top.dir) { it.parentFile }.first { it.isDirectory || it == Store.root })
@@ -159,6 +160,15 @@ private fun Body(host: Host, incoming: SnapshotStateList<Picked>, start: List<Sc
         if (left.isNotEmpty()) launch(Dispatchers.IO) {
             left.forEach { d -> runCatching { if (File(d, Inventory.MEMBERS).isFile) Store.pruneEmpty(d) } }
         }
+    }
+    // Телеметрия: какой экран открыт (вид, без имён) и падение в прошлый раз — предложить отправить.
+    val topName = stack.lastOrNull()?.let(::screenName)
+    LaunchedEffect(topName, stack.size) { topName?.let { kg.osmotr.core.Telemetry.event("экран", "$it (глубина ${stack.size})") } }
+    LaunchedEffect(Unit) {
+        val crashed = withContext(Dispatchers.IO) { kg.osmotr.core.Telemetry.unsentCrashes() }
+        if (crashed.isEmpty()) return@LaunchedEffect
+        val r = snackbar.showSnackbar("В прошлый раз «Осмотр» закрылся с ошибкой", actionLabel = "Отправить", duration = SnackbarDuration.Long)
+        if (r == SnackbarResult.ActionPerformed) sendDiagnostics(host) else withContext(Dispatchers.IO) { kg.osmotr.core.Telemetry.markSent() }
     }
     fun push(s: Screen) { stack.add(s) }
     fun pop() { if (stack.size > 1) stack.removeAt(stack.lastIndex) }
