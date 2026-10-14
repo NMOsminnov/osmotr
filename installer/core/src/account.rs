@@ -12,7 +12,7 @@ use isideload::{
     util::{callbacks::MaxCertsCallbackBox, fs_storage::FsStorage},
 };
 
-use crate::{Explain, Failure, R, flow::Ctx};
+use crate::{Explain, Failure, R, flow::Ctx, telemetry};
 
 pub type Signer = Sideloader<MaxCertsCallbackBox>;
 
@@ -38,6 +38,9 @@ pub async fn login(ctx: &Ctx, email: &str, password: &str, store: &Path) -> R<Si
     };
 
     std::fs::create_dir_all(store).explain("Не создали папку установщика")?;
+    // Телеметрия: связь с серверами — до входа; дальше — фазы входа (без адреса, пароля и кодов).
+    telemetry::probe_servers().await;
+    telemetry::line("вход: сервер подписи запросов (anisette)");
     let anisette = RemoteV3AnisetteProvider::default().explain("Нет связи с сервером подписи")?
         .set_storage(Box::new(FsStorage::new(store.join("anisette"))))
         .set_serial_number("2".into());
@@ -46,7 +49,10 @@ pub async fn login(ctx: &Ctx, email: &str, password: &str, store: &Path) -> R<Si
         .login(password, two_factor)
         .await
         .map_err(|e| login_failure(&format!("{e:?}"), email))?;
-    let session = DeveloperSession::from_account(&mut account).await.explain("Apple не открыла доступ к подписи приложений")?;
+    telemetry::line("вход: Apple приняла вход");
+    let session = DeveloperSession::from_account(&mut account).await
+        .map_err(|e| Failure::new("Apple не открыла доступ к подписи приложений", without_personal(&format!("{e:?}"), email)))?;
+    telemetry::line("вход: доступ к подписи приложений открыт");
 
     // Сертификатов у бесплатного Apple ID — два на всё; кончились — отозвать свой старый, а не
     // спрашивать человека, что такое сертификат.

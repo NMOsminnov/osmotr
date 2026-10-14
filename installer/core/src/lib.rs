@@ -14,11 +14,12 @@ pub mod apps;
 pub mod drivers;
 pub mod flow;
 pub mod phone;
+pub mod telemetry;
 
 use serde::{Deserialize, Serialize};
 
 /// Шаги установки — в порядке, в каком их видит человек.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum StepId {
     /// Драйверы Apple на компьютере (без них Windows не видит iPhone).

@@ -116,13 +116,27 @@ function onFinished({ left }) {
     <p class="muted">Кабель можно отключить. Программу можно закрыть.</p>`);
 }
 
+// Диагностика — файл на рабочем столе: шаги, связь с серверами, ошибки; адресов, паролей и кодов в нём нет.
+async function saveDiagnostics() {
+  const done = document.getElementById('diag-done');
+  try {
+    const path = await invoke('save_diagnostics');
+    if (done) done.textContent = `Сохранено: ${path}. Отправьте этот файл тому, кто помогает с установкой.`;
+  } catch (err) {
+    if (done) done.textContent = `Не сохранилось: ${err}`;
+  }
+}
+
 function onFailed({ text, detail }) {
   locked = true;
   if (current && rows[current]) rows[current].className = 'failed';
   show(`<h2>Остановились</h2><div class="error">${esc(text)}</div>
     <button id="again">Попробовать снова</button>
+    <button id="diag" class="secondary">Сохранить диагностику на рабочий стол</button>
+    <p class="muted" id="diag-done"></p>
     <details><summary>Подробности для того, кто будет разбираться</summary><pre>${esc(detail)}</pre></details>`);
   document.getElementById('again').onclick = () => location.reload();
+  document.getElementById('diag').onclick = saveDiagnostics;
 }
 
 listen('setup', ({ payload: e }) => {

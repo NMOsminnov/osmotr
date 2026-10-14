@@ -118,6 +118,9 @@ pub async fn describe(device: UsbmuxdDevice) -> R<Phone> {
     let name = lc.get_value(Some("DeviceName"), None).await.ok().and_then(|v| v.as_string().map(str::to_string)).unwrap_or_else(|| "iPhone".into());
     let version = lc.get_value(Some("ProductVersion"), None).await.explain("Телефон не назвал версию iOS")?
         .as_string().unwrap_or("0").to_string();
+    // Телеметрия: модель и версия iOS — да; имя телефона и идентификатор — нет (в имени бывает имя владельца).
+    let model = lc.get_value(Some("ProductType"), None).await.ok().and_then(|v| v.as_string().map(str::to_string)).unwrap_or_else(|| "?".into());
+    crate::telemetry::line(&format!("телефон: {model}, iOS {version}"));
     Ok(Phone { udid: device.udid.clone(), name, version, device })
 }
 

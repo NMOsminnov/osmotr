@@ -1,5 +1,6 @@
 package kg.osmotr.ui
 
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -199,7 +200,10 @@ fun ColumnsScreen(obj: File, ask: Boolean = false, onClose: () -> Unit, onSaved:
             when {
                 r == null || sr == null -> Box(m.fillMaxSize(), contentAlignment = Alignment.Center) { Text("Открываем файл…") }
                 width == 0 -> Box(m.fillMaxSize().padding(32.dp), contentAlignment = Alignment.Center) { Text("Лист пустой.") }
-                else -> SheetGrid(sr.sheet, width, across, selected = colAsk, modifier = m, state = list,
+                // Другой лист — таблица сменяется целиком, перекрёстно: подписи не перелетают поодиночке.
+                else -> androidx.compose.animation.AnimatedContent(sr.sheet.name, m, transitionSpec = {
+                    androidx.compose.animation.fadeIn(motion()) togetherWith androidx.compose.animation.fadeOut(motion())
+                }, label = "лист") { _ -> SheetGrid(sr.sheet, width, across, selected = colAsk, modifier = Modifier.fillMaxSize(), state = list,
                     marks = { c -> fieldAt[c]?.let { ColumnMark(shortTitle(it), manual[c] == it) } },
                     look = { row ->
                         when {
@@ -210,7 +214,7 @@ fun ColumnsScreen(obj: File, ask: Boolean = false, onClose: () -> Unit, onSaved:
                             else -> RowLook.OTHER
                         }
                     },
-                    onColumn = { colAsk = it }, onRow = { rowAsk = it })
+                    onColumn = { colAsk = it }, onRow = { rowAsk = it }) }
             }
         }
 

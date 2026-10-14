@@ -13,8 +13,8 @@ targets:
       path: iosApp/Info.plist
       properties:
         CFBundleDisplayName: Осмотр
-        CFBundleShortVersionString: "3.4"
-        CFBundleVersion: "11"
+        CFBundleShortVersionString: "3.5"
+        CFBundleVersion: "12"
         UILaunchScreen:
           UIColorName: LaunchBackground
         # «Открыть в «Осмотр»» и «Поделиться» из WhatsApp, «Файлов», почты: опись Excel.
@@ -36,8 +36,8 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: kg.osmotr.app
-        MARKETING_VERSION: "3.4"
-        CURRENT_PROJECT_VERSION: "11"
+        MARKETING_VERSION: "3.5"
+        CURRENT_PROJECT_VERSION: "12"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         CODE_SIGNING_ALLOWED: "NO"
         CODE_SIGNING_REQUIRED: "NO"

@@ -188,6 +188,8 @@ class OsmotrMotionTest {
         run(Act("опись: меню → «Столбцы описи»",
             prepare = { tapDesc("Ещё") },
             act = { tapText("Столбцы описи") },
+            // Переход на экран — появление сразу, как у любого экрана (окно диалога — своё).
+            expected = setOf("таблица РЫВОК", "подпись столбца РЫВОК", "панель РЫВОК"),
             // Назад — стрелкой экрана столбцов (у диалога своё окно: его «назад» — не у активности).
             undo = { onAllNodes(hasContentDescription("Назад")).onLast().performClick() }))
     }
@@ -230,7 +232,8 @@ class OsmotrMotionTest {
     @Test fun плашка() {
         val obj = inventory("Плохая", bad = true)
         show(Screen.Inventory(obj))
-        run(Act("опись: плашка «проверьте» — скрыть", act = { tapText("Всё верно, скрыть") }, repeats = 1))
+        // Плашка свернулась — список поднялся, и снизу в окно вошли следующие строки: так и должно быть.
+        run(Act("опись: плашка «проверьте» — скрыть", act = { tapText("Всё верно, скрыть") }, repeats = 1, expected = setOf("строка описи РЫВОК")))
     }
 
     companion object {

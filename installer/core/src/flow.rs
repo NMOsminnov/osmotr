@@ -26,7 +26,8 @@ impl Ctx {
         Self { tx, answers: Arc::new(Mutex::new(answers)), work, osmotr_ipa }
     }
 
-    pub fn send(&self, e: Event) { let _ = self.tx.send(e); }
+    /// Событие окну — и в журнал телеметрии (без личного: telemetry.rs).
+    pub fn send(&self, e: Event) { crate::telemetry::event(&e); let _ = self.tx.send(e); }
 
     pub fn step(&self, id: StepId, state: StepState, note: impl Into<String>) {
         self.send(Event::Step { id, state, note: note.into() });
@@ -64,6 +65,8 @@ impl Ctx {
 
 /// Вся установка. Ошибка — уже показана окну событием [Event::Failed].
 pub async fn run(ctx: Ctx) -> R<()> {
+    let ipa = std::fs::metadata(&ctx.osmotr_ipa).map(|m| format!("{:.1} МБ", m.len() as f64 / 1048576.0)).unwrap_or_else(|_| "нет".into());
+    crate::telemetry::init(&ctx.work, &format!("установщик {} · «Осмотр» внутри: {ipa}", env!("CARGO_PKG_VERSION")));
     let result = steps(&ctx).await;
     match &result {
         Ok(left) => ctx.send(Event::Finished { left: left.clone() }),
