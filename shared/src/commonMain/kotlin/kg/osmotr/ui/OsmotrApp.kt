@@ -55,7 +55,8 @@ object ToastBus {
 sealed interface Screen {
     data class Browser(val dir: File) : Screen
     data class Viewer(val dir: File, val start: File) : Screen
-    data class Search(val here: File, val query: String? = null) : Screen
+    /** [place] — присланные фото: найти, куда положить (папка, предмет описи, новая папка). */
+    data class Search(val here: File, val query: String? = null, val place: List<Picked>? = null) : Screen
     data class Contacts(val dir: File) : Screen
     /** [place] — присланные фото («Поделиться» из WhatsApp): выбрать папку, куда их положить. */
     data class Tree(val here: File, val place: List<Picked>? = null) : Screen
@@ -96,7 +97,7 @@ private fun Body(host: Host, incoming: SnapshotStateList<Picked>, start: List<Sc
         // Фото (WhatsApp, галерея через «Поделиться») — спросить папку; книги — описями.
         val (photos, books) = got.partition { it.isPhoto }
         if (books.isNotEmpty()) InventoryImport.start(host, scope, books) { stack.add(Screen.Inventory(it)) }
-        if (photos.isNotEmpty()) stack.add(Screen.Tree(Store.root, place = photos))
+        if (photos.isNotEmpty()) stack.add(Screen.Search(Store.root, place = photos))
     }
     if (InventoryImport.jobs.isNotEmpty()) ImportDialog(InventoryImport.jobs, onClose = { InventoryImport.jobs.clear() })
     val snackbar = remember { SnackbarHostState() }
@@ -199,7 +200,22 @@ private fun Body(host: Host, incoming: SnapshotStateList<Picked>, start: List<Sc
                 back = if (stack.size > 1) ({ pop() }) else null,
             )
             // Найденное открывается вместо поиска: «назад» — туда, откуда искали.
-            is Screen.Search -> SearchScreen(here = top.here, initial = top.query.orEmpty(), open = { replaceTop(Screen.Browser(it)) }, close = { pop() })
+            is Screen.Search -> {
+                val place = top.place
+                SearchScreen(here = top.here, initial = top.query.orEmpty(), close = { pop() }, place = place?.size,
+                    tree = place?.let { p -> { replaceTop(Screen.Tree(Store.root, place = p)) } },
+                    open = { dir ->
+                        if (place == null) replaceTop(Screen.Browser(dir))
+                        // Присланные фото — в найденную папку снимками, и открыть её.
+                        else scope.launch {
+                            val n = withContext(Dispatchers.IO) {
+                                Store.addPhotos(dir, place.map { Triple(it.name, it.bytes, it.takenMs) }).also { Inventory.refreshReportSoon(dir) }.size
+                            }
+                            host.toast("Добавлено в «${dir.name}»: ${plural(n, "фото", "фото", "фото")}")
+                            replaceTop(Screen.Browser(dir))
+                        }
+                    })
+            }
             is Screen.Inventory -> InventoryScreen(obj = top.obj, into = top.into, initialQuery = top.query, openFolder = { push(Screen.Browser(it)) },
                 folders = { push(Screen.Browser(it)) }, close = { pop() },
                 // Папка после набора могла переименоваться — вернуться в неё по новому имени.

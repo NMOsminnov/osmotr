@@ -1,5 +1,7 @@
 package kg.osmotr.ui
 
+import androidx.compose.ui.platform.testTag
+import androidx.compose.material3.TextButton
 import kg.osmotr.core.File
 import kg.osmotr.core.Inventory
 import kg.osmotr.core.Platform
@@ -69,7 +71,13 @@ import kotlinx.coroutines.withContext
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SearchScreen(here: File, initial: String = "", open: (File) -> Unit, close: () -> Unit) {
+fun SearchScreen(here: File, initial: String = "", open: (File) -> Unit, close: () -> Unit, place: Int? = null, tree: (() -> Unit)? = null) {
+    // [place] — сколько присланных фото кладём (автор, 14.10.2026: «При добавлении нужен поиск по папкам,
+    // инвентарникам… Ибо это может быть и новый инвентарник»): найденное — куда класть; нет в описи —
+    // «Новая папка «…»» в нужной описи; [tree] — выбрать в дереве папок.
+    val objects by produceState(emptyList<File>(), place) {
+        if (place != null) value = withContext(Dispatchers.IO) { Store.foldersIn(Store.root).filter { Inventory.fileIn(it) != null } }
+    }
     var query by rememberSaveable { mutableStateOf(initial) }
     val obj by produceState<File?>(null, here) { value = withContext(Dispatchers.IO) { if (here == Store.root) null else Inventory.objectOf(here) } }
     var everywhere by rememberSaveable { mutableStateOf(false) }
@@ -100,6 +108,10 @@ fun SearchScreen(here: File, initial: String = "", open: (File) -> Unit, close: 
             SearchCapsule(query, { query = it }, focus, onDone = { keyboard?.hide() }, placeholder = "Папка, инв. номер, человек",
                 modifier = Modifier.weight(1f))
         }
+        if (place != null) Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("Куда положить: ${plural(place, "фото", "фото", "фото")}", Modifier.weight(1f), style = MaterialTheme.typography.titleSmall)
+            tree?.let { t -> TextButton(onClick = t) { Text("Дерево папок") } }
+        }
         // Внутри описи — где искать: только в ней или везде.
         obj?.let { o ->
             Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -110,7 +122,7 @@ fun SearchScreen(here: File, initial: String = "", open: (File) -> Unit, close: 
         }
         HorizontalDivider()
         Box(Modifier.fillMaxSize()) {
-            if (query.isNotBlank() && index != null && hits.isEmpty() && itemHits.isEmpty()) Text("Ничего не найдено", Modifier.align(Alignment.TopCenter).padding(24.dp),
+            if (place == null && query.isNotBlank() && index != null && hits.isEmpty() && itemHits.isEmpty()) Text("Ничего не найдено", Modifier.align(Alignment.TopCenter).padding(24.dp),
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
             LazyColumn(Modifier.fillMaxSize()) {
                 // Предметы описей — первыми: нашёл — сразу в папку предмета, к снимкам.
@@ -123,6 +135,23 @@ fun SearchScreen(here: File, initial: String = "", open: (File) -> Unit, close: 
                 }
                 if (itemHits.isNotEmpty() && hits.isNotEmpty()) item(key = "folders-h") { Section("Папки") }
                 items(hits, key = { it.entry.dir.path }) { hit -> Result(hit, query) { keyboard?.hide(); open(hit.entry.dir) } }
+                // Нового инвентарника нет ни в описи, ни в папках — завести папку с этим названием там, где он стоит.
+                val name = query.trim()
+                if (place != null && name.isNotEmpty()) {
+                    item(key = "new-h") { Section("Новая папка «$name»") }
+                    items(objects + Store.root, key = { "n:" + it.path }) { parent ->
+                        Row(Modifier.fillMaxWidth().clickable {
+                            keyboard?.hide()
+                            scope.launch {
+                                val dir = withContext(Dispatchers.IO) { Store.createFolder(parent, name) ?: File(parent, Store.cleanName(name)).takeIf { it.isDirectory } }
+                                dir?.let(open)
+                            }
+                        }.padding(horizontal = 16.dp, vertical = 12.dp).testTag("новая папка"), verticalAlignment = Alignment.CenterVertically) {
+                            Icon(AppIcons.CreateNewFolder, null, tint = MaterialTheme.colorScheme.primary)
+                            Text("  в " + if (parent == Store.root) "«Осмотры» (без описи)" else "опись «${parent.name}»", style = MaterialTheme.typography.bodyLarge)
+                        }
+                    }
+                }
             }
         }
     }
