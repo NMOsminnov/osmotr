@@ -242,13 +242,19 @@ async fn vpn(ctx: &Ctx, phone: &Phone, email: &str, password: &str) -> R<()> {
     ctx.step(StepId::Vpn, StepState::Running, "Входим в App Store");
     if let apps::StoreLogin::NeedCode = apps::store_login(&tool, &home, email, password, None).await? {
         let mut error = None;
-        loop {
-            let Some(code) = ctx.ask_code("на ваши устройства Apple — для App Store", error.take()).await else { continue };
-            match apps::store_login(&tool, &home, email, password, Some(&code)).await? {
-                apps::StoreLogin::Ok => break,
-                apps::StoreLogin::NeedCode => error = Some("Код не подошёл — проверьте и введите ещё раз".to_string()),
+        let mut signed_in = false;
+        // Не больше пяти попыток: окно закрыли на вопросе о коде — не крутиться без конца.
+        for _ in 0..5 {
+            match ctx.ask_code("на ваши устройства Apple — для App Store", error.take()).await {
+                Some(code) => match apps::store_login(&tool, &home, email, password, Some(&code)).await? {
+                    apps::StoreLogin::Ok => { signed_in = true; break }
+                    apps::StoreLogin::NeedCode => error = Some("Код не подошёл — проверьте и введите ещё раз".to_string()),
+                },
+                // «Прислать ещё раз» — вход без кода заново: Apple пришлёт новый.
+                None => { let _ = apps::store_login(&tool, &home, email, password, None).await?; }
             }
         }
+        if !signed_in { return Err(Failure::new("App Store не принял код", "пять попыток")) }
     }
     ctx.step(StepId::Vpn, StepState::Running, "Скачиваем из App Store");
     let ipa = ctx.work.join("LocalDevVPN.ipa");

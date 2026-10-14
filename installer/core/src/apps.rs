@@ -106,6 +106,9 @@ pub async fn store_login(tool: &Path, home: &Path, email: &str, password: &str, 
     let text = format!("{}\n{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr)).to_lowercase();
     // Что ответил ipatool — целиком в журнал (почта и прочее вычищаются там же).
     crate::telemetry::line(&format!("App Store: вход — код {:?}, ответ: {}", out.status.code(), text.trim()));
+    // Просьба о коде — по тексту, при любом коде выхода: ipatool 2.7.0 просит код и выходит с 0
+    // («2fa code is required; run the command again… --auth-code»), 2.6.0 выходил с ошибкой.
+    if wants_code(&text) { return Ok(StoreLogin::NeedCode) }
     if out.status.success() {
         // Вход «прошёл» — проверить, что ipatool его помнит: прежде скачивание падало с «account not
         // found in the keyring» сразу после успешного входа (14.10.2026).
@@ -115,8 +118,23 @@ pub async fn store_login(tool: &Path, home: &Path, email: &str, password: &str, 
         if !info.status.success() { return Err(Failure::new("App Store не запомнил вход", said.trim())) }
         return Ok(StoreLogin::Ok)
     }
-    if text.contains("2fa") || text.contains("auth code") || text.contains("auth-code") { return Ok(StoreLogin::NeedCode) }
     Err(Failure::new("App Store не пустил войти", text.trim()))
+}
+
+/// ipatool просит код подтверждения (текст ответа, в нижнем регистре).
+fn wants_code(text: &str) -> bool {
+    text.contains("2fa code is required") || text.contains("--auth-code") || text.contains("auth code") || text.contains("2fa")
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn просьба_о_коде_узнаётся_и_при_успешном_выходе() {
+        // Дословно из журнала 0.2.5 (14.10.2026): ipatool 2.7.0, код выхода 0.
+        let t = "11:11am inf preparing authentication; the first login may take a few minutes\n11:12am inf 2fa code is required; run the command again and supply a code using the `--auth-code` flag";
+        assert!(super::wants_code(t));
+        assert!(!super::wants_code("11:12am inf email=<почта> name=x success=true"));
+    }
 }
 
 /// Скачать LocalDevVPN из App Store (с «покупкой» бесплатной лицензии на этот Apple ID).
