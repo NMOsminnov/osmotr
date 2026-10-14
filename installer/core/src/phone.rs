@@ -254,6 +254,50 @@ pub async fn profiles(phone: &Phone) -> R<Vec<String>> {
     Ok(all.into_iter().filter_map(|der| profile_uuid(&der)).collect())
 }
 
+/// Профиль подписи: UUID, приложение (AppIDName), когда выпущен.
+#[derive(Debug, Clone)]
+pub struct ProfileInfo { pub uuid: String, pub app: String, pub created: std::time::SystemTime }
+
+fn profile_info(der: &[u8]) -> Option<ProfileInfo> {
+    let start = der.windows(6).position(|w| w == b"<?xml ")?;
+    let end = der.windows(8).rposition(|w| w == b"</plist>")? + 8;
+    let v = plist::Value::from_reader_xml(std::io::Cursor::new(&der[start..end])).ok()?;
+    let d = v.as_dictionary()?;
+    Some(ProfileInfo {
+        uuid: d.get("UUID")?.as_string()?.to_string(),
+        app: d.get("AppIDName").and_then(|v| v.as_string()).unwrap_or("?").to_string(),
+        created: d.get("CreationDate").and_then(|v| v.as_date()).map(std::time::SystemTime::from).unwrap_or(std::time::UNIX_EPOCH),
+    })
+}
+
+/// Приложения, которые ставит установщик (по AppIDName профиля): их профили — наши.
+const OURS: [&str; 3] = ["SideStore", "AltWidgetExtension", "Osmotr"];
+
+/// Какие профили снять: из наших — все, кроме самого нового у каждого приложения (прежние
+/// установки, отозванные сертификаты: в настройках они путают — «чьему доверять?»). Чужие не трогаются.
+pub fn stale(profiles: &[ProfileInfo]) -> Vec<String> {
+    let mut newest: std::collections::HashMap<&str, &ProfileInfo> = std::collections::HashMap::new();
+    for p in profiles.iter().filter(|p| OURS.contains(&p.app.as_str())) {
+        let e = newest.entry(p.app.as_str()).or_insert(p);
+        if p.created > e.created { *e = p }
+    }
+    profiles.iter()
+        .filter(|p| OURS.contains(&p.app.as_str()) && newest.get(p.app.as_str()).is_some_and(|n| n.uuid != p.uuid))
+        .map(|p| p.uuid.clone()).collect()
+}
+
+/// Снять старые профили наших приложений; сколько снято.
+pub async fn prune_profiles(phone: &Phone) -> R<usize> {
+    let provider = phone.provider()?;
+    let mut mis = idevice::misagent::MisagentClient::connect(&provider).await.explain("Телефон не дал профили")?;
+    let all: Vec<ProfileInfo> = mis.copy_all().await.explain("Телефон не дал профили")?.iter().filter_map(|d| profile_info(d)).collect();
+    let old = stale(&all);
+    let mut removed = 0;
+    for id in &old { if mis.remove(id).await.is_ok() { removed += 1 } }
+    crate::telemetry::line(&format!("профили: было {}, снято старых {removed} из {}", all.len(), old.len()));
+    Ok(removed)
+}
+
 /// UUID из профиля подписи (это PKCS#7 с plist внутри — ищем ключ UUID в тексте).
 fn profile_uuid(der: &[u8]) -> Option<String> {
     let start = der.windows(6).position(|w| w == b"<?xml ")?;
@@ -272,4 +316,23 @@ pub async fn wait_back(udid: &str, limit: Duration) -> Option<Phone> {
         tokio::time::sleep(Duration::from_secs(2)).await;
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ProfileInfo, stale};
+    use std::time::{Duration, UNIX_EPOCH};
+
+    fn p(uuid: &str, app: &str, day: u64) -> ProfileInfo {
+        ProfileInfo { uuid: uuid.into(), app: app.into(), created: UNIX_EPOCH + Duration::from_secs(day * 86_400) }
+    }
+
+    #[test]
+    fn снимаются_только_прежние_наши_новый_и_чужие_остаются() {
+        let all = vec![p("s1", "SideStore", 1), p("s2", "SideStore", 3), p("s3", "SideStore", 2),
+            p("o1", "Osmotr", 5), p("o2", "Osmotr", 4), p("w1", "AltWidgetExtension", 3), p("x1", "Чужое приложение", 1), p("x2", "Чужое приложение", 9)];
+        let mut old = stale(&all);
+        old.sort();
+        assert_eq!(old, vec!["o2", "s1", "s3"]);
+    }
 }

@@ -30,6 +30,14 @@ const pictures = {
   devmode: phone(`<text x="95" y="72" text-anchor="middle" font-size="9" fill="currentColor" opacity=".7">Конфиденциальность</text>
     <rect x="56" y="88" width="78" height="26" rx="8" fill="var(--bg)" stroke="var(--line)"/><text x="62" y="104" font-size="8.5" fill="currentColor">Режим разраб.</text>
     <rect x="110" y="94" width="20" height="13" rx="6.5" fill="var(--done)"/><circle cx="123" cy="100.5" r="5" fill="#fff"/>`),
+  // Доверие разработчику: Настройки → Основные → VPN и управление устройством → Apple ID → «Доверять».
+  trustdev: phone(`<text x="95" y="56" text-anchor="middle" font-size="8.5" fill="currentColor" opacity=".7">VPN и управление</text>
+    <text x="95" y="66" text-anchor="middle" font-size="8.5" fill="currentColor" opacity=".7">устройством</text>
+    <rect x="56" y="76" width="78" height="22" rx="7" fill="var(--bg)" stroke="var(--line)"/><text x="62" y="90" font-size="8" fill="currentColor">ваш Apple ID  ›</text>
+    <rect x="56" y="112" width="78" height="56" rx="10" fill="var(--bg)" stroke="var(--line)"/>
+    <text x="95" y="130" text-anchor="middle" font-size="8.5" fill="currentColor">Доверять</text><text x="95" y="141" text-anchor="middle" font-size="8.5" fill="currentColor">«ваш Apple ID»?</text>
+    <text x="95" y="160" text-anchor="middle" font-size="11" font-weight="600" fill="var(--accent)">Доверять</text>
+    <circle cx="112" cy="157" r="11" fill="var(--accent)" opacity=".25"/>`),
 };
 
 function renderSteps(list) {
@@ -131,7 +139,11 @@ function askCode({ to, error }) {
 
 function onFinished({ left }) {
   locked = true;
+  // «Доверять» — первым и с картинкой: без него «Осмотр» не откроется, а сделать это может только
+  // человек — iOS не даёт довериться бесплатному сертификату с компьютера (проверено 14.10.2026).
+  const trust = left.length && left[0].includes('Доверять');
   show(`<div class="done-big"><div class="ok">✓</div><h2>Готово — «Осмотр» на iPhone</h2></div>
+    ${trust ? `<div class="trust"><p><b>Сначала — одно нажатие на iPhone</b>, иначе «Осмотр» не откроется:</p>${pictures.trustdev}</div>` : ''}
     ${left.length ? `<p>Осталось сделать на телефоне — по порядку:</p><ol class="todo">${left.map((t) => `<li>${esc(t)}</li>`).join('')}</ol>` : ''}
     <p class="muted">Кабель можно отключить. Программу можно закрыть.</p>`, 'finished');
 }

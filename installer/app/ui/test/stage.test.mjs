@@ -12,9 +12,9 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const chrome = [process.env.CHROME, 'chromium-browser', 'chromium', 'google-chrome',
   'C:/Program Files/Google/Chrome/Application/chrome.exe'].find((c) => c && (c.includes('/') ? existsSync(c) : true));
 
-function run() {
+function run(hash = '') {
   const html = execFileSync(chrome, ['--headless', '--disable-gpu', '--no-sandbox', '--allow-file-access-from-files',
-    '--virtual-time-budget=5000', '--dump-dom', pathToFileURL(path.join(here, 'harness.html')).href],
+    '--virtual-time-budget=5000', '--dump-dom', pathToFileURL(path.join(here, 'harness.html')).href + hash],
     { encoding: 'utf8', timeout: 60000, stdio: ['ignore', 'pipe', 'ignore'] });
   const m = html.match(/<pre id="result">([^<]*)<\/pre>/);
   assert.ok(m && m[1], 'обвязка не отдала итог');
@@ -31,4 +31,10 @@ test('на экране хода — заголовок текущего шаг�
   // Последний ход перед входом — шаг «Вход в Apple ID», затем экран входа.
   const { progressText } = run();
   assert.equal(progressText, 'Войдите в Apple ID');
+});
+
+test('на «Готово» доверие разработчику — первым и с картинкой', () => {
+  const { trustPicture, first } = run('#finished');
+  assert.ok(trustPicture, 'нет картинки «Доверять»');
+  assert.match(first, /Доверять/);
 });

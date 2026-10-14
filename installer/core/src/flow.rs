@@ -208,6 +208,8 @@ async fn steps(ctx: &Ctx) -> R<Vec<String>> {
 
     // 9. Доверие разработчику — без настроек, если телефон даст; иначе — подсказка в конце.
     ctx.step(StepId::Signer, StepState::Running, "Проверяем");
+    // Прежние профили наших приложений (прошлые установки) — снять: в настройках остаётся один разработчик.
+    let _ = phone::prune_profiles(&phone).await;
     let trusted = match phone::profiles(&phone).await {
         Ok(ids) if !ids.is_empty() => {
             let mut ok = false;

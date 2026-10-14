@@ -22,6 +22,15 @@
     const emit = (e) => handler({ payload: e });
     window.scenario = async () => {
       await new Promise((r) => setTimeout(r, 50));
+      if (location.hash === '#finished') {   // экран «Готово»: «Доверять» — первым и с картинкой
+        emit({ type: 'finished', left: ['Настройки → Основные → VPN и управление устройством → <почта> → «Доверять».', 'Откройте LocalDevVPN'] });
+        await new Promise((r) => setTimeout(r, 0));
+        document.getElementById('result').textContent = JSON.stringify({
+          trustPicture: !!document.querySelector('#stage .trust svg'),
+          first: document.querySelector('#stage .todo li')?.textContent ?? '',
+        });
+        return;
+      }
       appeared.length = 0;
       emit({ type: 'step', id: 'drivers', state: 'running', note: 'Проверяем' });
       for (let p = 0; p <= 100; p += 2) emit({ type: 'step', id: 'drivers', state: 'running', note: `Скачиваем драйверы — ${p} %` });
