@@ -39,15 +39,29 @@ function renderSteps(list) {
   }
 }
 
-function show(html) { stage.innerHTML = `<div class="card">${html}</div>`; }
+// Экран справа. [key] — какой это экран: тот же — не пересоздаётся (без анимации появления и без
+// перезапуска крутилки); новый — появляется. Прежде каждое событие шага («Скачиваем — 41 %»)
+// пересоздавало карточку, и она всплывала заново на каждый процент (автор, 14.10.2026: «Дёргания
+// интерфейса в нём были»).
+let screen = '';
+function show(html, key = '') {
+  screen = key;
+  stage.innerHTML = `<div class="card" data-screen="${esc(key)}">${html}</div>`;
+}
 
 function showProgress() {
   if (locked || hintShown || !current) return;
   const li = rows[current];
   const title = li?.querySelector('.title').textContent ?? '';
-  const note = li?.querySelector('.note').textContent ?? '';
+  const note = li?.querySelector('.note').textContent || 'Подождите — программа работает сама.';
+  // Ход установки уже на экране — только текст на месте.
+  if (screen === 'progress') {
+    stage.querySelector('h2').textContent = title;
+    stage.querySelector('.muted').textContent = note;
+    return;
+  }
   show(`<div class="waiting-big"><div class="spinner"></div><h2>${esc(title)}</h2></div>
-        <p class="muted">${esc(note || 'Подождите — программа работает сама.')}</p>`);
+        <p class="muted">${esc(note)}</p>`, 'progress');
 }
 
 function onStep({ id, state, note }) {
@@ -62,8 +76,10 @@ function onStep({ id, state, note }) {
 function onHint({ title, text, image }) {
   if (locked) return;
   hintShown = true;
+  const key = `hint:${title}|${text}|${image ?? ''}`;
+  if (screen === key) return;   // та же подсказка ещё раз — не всплывать заново
   show(`<h2>${esc(title)}</h2>${pictures[image] ?? ''}<p>${esc(text)}</p>
-        <p class="muted">Программа сама заметит, когда сделаете.</p>`);
+        <p class="muted">Программа сама заметит, когда сделаете.</p>`, key);
 }
 
 function askCredentials({ error }) {
@@ -74,7 +90,7 @@ function askCredentials({ error }) {
     <label>Apple ID (почта)<input id="email" type="email" autocomplete="username" spellcheck="false"></label>
     <label>Пароль<input id="password" type="password" autocomplete="current-password"></label>
     <button id="go">Войти</button>
-    <p class="muted">Пароль никуда не сохраняется — он уходит только в Apple.</p>`);
+    <p class="muted">Пароль никуда не сохраняется — он уходит только в Apple.</p>`, 'credentials');
   const email = document.getElementById('email'), password = document.getElementById('password'), go = document.getElementById('go');
   email.focus();
   const send = () => {
@@ -94,7 +110,7 @@ function askCode({ to, error }) {
     ${error ? `<div class="error">${esc(error)}</div>` : ''}
     <input id="code" class="code" inputmode="numeric" maxlength="6" autocomplete="one-time-code">
     <button id="go">Подтвердить</button>
-    <button id="again" class="ghost">Код не пришёл — прислать ещё раз</button>`);
+    <button id="again" class="ghost">Код не пришёл — прислать ещё раз</button>`, 'code');
   const code = document.getElementById('code');
   code.focus();
   const send = () => {
@@ -113,7 +129,7 @@ function onFinished({ left }) {
   locked = true;
   show(`<div class="done-big"><div class="ok">✓</div><h2>Готово — «Осмотр» на iPhone</h2></div>
     ${left.length ? `<p>Осталось сделать на телефоне — по порядку:</p><ol class="todo">${left.map((t) => `<li>${esc(t)}</li>`).join('')}</ol>` : ''}
-    <p class="muted">Кабель можно отключить. Программу можно закрыть.</p>`);
+    <p class="muted">Кабель можно отключить. Программу можно закрыть.</p>`, 'finished');
 }
 
 // Диагностика — файл на рабочем столе: шаги, связь с серверами, ошибки; адресов, паролей и кодов в нём нет.
@@ -134,7 +150,7 @@ function onFailed({ text, detail }) {
     <button id="again">Попробовать снова</button>
     <button id="diag" class="secondary">Сохранить диагностику на рабочий стол</button>
     <p class="muted" id="diag-done"></p>
-    <details><summary>Подробности для того, кто будет разбираться</summary><pre>${esc(detail)}</pre></details>`);
+    <details><summary>Подробности для того, кто будет разбираться</summary><pre>${esc(detail)}</pre></details>`, 'failed');
   document.getElementById('again').onclick = () => location.reload();
   document.getElementById('diag').onclick = saveDiagnostics;
 }
@@ -153,6 +169,6 @@ listen('setup', ({ payload: e }) => {
 
 (async () => {
   renderSteps(await invoke('steps'));
-  show(`<div class="waiting-big"><div class="spinner"></div><h2>Начинаем</h2></div>`);
+  show(`<div class="waiting-big"><div class="spinner"></div><h2>Начинаем</h2></div>`, 'start');
   try { await invoke('start'); } catch (err) { onFailed({ text: String(err), detail: '' }); }
 })();

@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="ru">
+<head><meta charset="utf-8"><link rel="stylesheet" href="../style.css"></head>
+<body>
+  <!-- Обвязка проверки окна: ядро подменено заглушкой, события подаются по сценарию, итог — в #result. -->
+  <header></header>
+  <main><ol id="steps"></ol><section id="stage"></section></main>
+  <pre id="result"></pre>
+  <script>
+    let handler = null;
+    window.__TAURI__ = {
+      core: { invoke: async (cmd) => cmd === 'steps'
+        ? [['drivers', 'Драйверы'], ['phone', 'iPhone подключён'], ['appleId', 'Вход в Apple ID'], ['sideStore', 'SideStore']]
+        : null },
+      event: { listen: (_name, fn) => { handler = fn; } },
+    };
+    // Сколько раз карточка справа появлялась заново (каждая — с анимацией появления).
+    const appeared = [];
+    new MutationObserver((list) => {
+      for (const m of list) for (const n of m.addedNodes) if (n.classList?.contains('card')) appeared.push(n.dataset.screen);
+    }).observe(document.getElementById('stage'), { childList: true });
+    const emit = (e) => handler({ payload: e });
+    window.scenario = async () => {
+      await new Promise((r) => setTimeout(r, 50));
+      appeared.length = 0;
+      emit({ type: 'step', id: 'drivers', state: 'running', note: 'Проверяем' });
+      for (let p = 0; p <= 100; p += 2) emit({ type: 'step', id: 'drivers', state: 'running', note: `Скачиваем драйверы — ${p} %` });
+      emit({ type: 'step', id: 'drivers', state: 'done', note: '' });
+      emit({ type: 'step', id: 'phone', state: 'running', note: 'Ищем телефон' });
+      emit({ type: 'hint', title: 'Подключите iPhone', text: 'Кабелем к компьютеру', image: 'cable' });
+      emit({ type: 'hint', title: 'Подключите iPhone', text: 'Кабелем к компьютеру', image: 'cable' });
+      emit({ type: 'step', id: 'phone', state: 'running', note: 'Ищем телефон…' });
+      emit({ type: 'hintDone' });
+      emit({ type: 'step', id: 'phone', state: 'done', note: '' });
+      emit({ type: 'step', id: 'appleId', state: 'running', note: 'Входим' });
+      emit({ type: 'askCredentials', error: null });
+      await new Promise((r) => setTimeout(r, 0));   // наблюдатель отдаёт изменения после синхронного кода
+      const progressText = document.querySelector('#stage h2')?.textContent;
+      document.getElementById('result').textContent = JSON.stringify({ appeared, progressText });
+    };
+  </script>
+  <script src="../app.js"></script>
+  <script>setTimeout(() => window.scenario(), 0);</script>
+</body>
+</html>

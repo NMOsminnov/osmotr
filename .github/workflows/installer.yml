@@ -88,9 +88,13 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: installer
-      - name: Ядро — проверка и сборка под Windows
+      # Окно не дёргается: тот же экран обновляется на месте (installer/app/ui/test) — Chrome на машине есть.
+      - name: Окно — проверка в браузере
+        shell: bash
+        run: CHROME="C:/Program Files/Google/Chrome/Application/chrome.exe" node --test installer/app/ui/test/stage.test.mjs
+      - name: Ядро — тесты (телеметрия без личного) и сборка под Windows
         working-directory: installer
-        run: cargo build --release -p osmotr-setup
+        run: cargo test -p osmotr-setup && cargo build --release -p osmotr-setup
       - name: Окно — один exe со всем внутри
         working-directory: installer
         env:
