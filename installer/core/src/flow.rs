@@ -186,6 +186,7 @@ async fn steps(ctx: &Ctx) -> R<Vec<String>> {
         match vpn(ctx, &phone, &email, &password).await {
             Ok(()) => ctx.step(StepId::Vpn, StepState::Done, ""),
             Err(f) => {
+                crate::telemetry::line(&format!("LocalDevVPN — руками: {} — {}", f.text, f.detail));
                 ctx.step(StepId::Vpn, StepState::Manual, f.text.clone());
                 left.push("Поставьте из App Store бесплатное приложение LocalDevVPN.".into());
             }
@@ -198,10 +199,17 @@ async fn steps(ctx: &Ctx) -> R<Vec<String>> {
     let trusted = match phone::profiles(&phone).await {
         Ok(ids) if !ids.is_empty() => {
             let mut ok = false;
-            for id in ids { if phone::trust_signer(&phone, &id).await.unwrap_or(false) { ok = true } }
+            for id in ids {
+                match phone::trust_signer(&phone, &id).await {
+                    Ok(true) => ok = true,
+                    Ok(false) => crate::telemetry::line("доверие разработчику: телефон отказал"),
+                    Err(f) => crate::telemetry::line(&format!("доверие разработчику: {} — {}", f.text, f.detail)),
+                }
+            }
             ok
         }
-        _ => false,
+        Ok(_) => { crate::telemetry::line("доверие разработчику: профилей подписи на телефоне нет"); false }
+        Err(f) => { crate::telemetry::line(&format!("доверие разработчику: профили не прочитаны — {} — {}", f.text, f.detail)); false }
     };
     if trusted {
         ctx.step(StepId::Signer, StepState::Done, "");

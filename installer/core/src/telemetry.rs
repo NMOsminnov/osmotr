@@ -15,7 +15,7 @@ use std::{
     collections::HashMap,
     io::Write,
     path::{Path, PathBuf},
-    sync::{Mutex, OnceLock},
+    sync::Mutex,
     time::{Duration, Instant},
 };
 
@@ -27,7 +27,8 @@ struct Log {
     running: HashMap<StepId, Instant>,
 }
 
-static LOG: OnceLock<Mutex<Log>> = OnceLock::new();
+/// Журнал сеанса; новый сеанс (повтор установки, тест) — заменяет прежний.
+static LOG: Mutex<Option<Log>> = Mutex::new(None);
 
 /// Начать сеанс в папке установщика [work]: что за установщик и что внутри.
 pub fn init(work: &Path, about: &str) {
@@ -38,14 +39,55 @@ pub fn init(work: &Path, about: &str) {
     if std::fs::metadata(&file).map(|m| m.len() > 1 << 20).unwrap_or(false) {
         let _ = std::fs::rename(&file, dir.join("log.1.txt"));
     }
-    let _ = LOG.set(Mutex::new(Log { file, started: Instant::now(), running: HashMap::new() }));
-    line(&format!("── сеанс: {about} · {} {}", std::env::consts::OS, std::env::consts::ARCH));
+    if let Ok(mut log) = LOG.lock() { *log = Some(Log { file, started: Instant::now(), running: HashMap::new() }); }
+    line(&format!("── сеанс: {about} · {} · {}", system(), std::env::consts::ARCH));
+    // Падение самой программы — в журнал, затем как обычно.
+    let prior = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        line(&format!("ПАДЕНИЕ программы: {info}"));
+        prior(info);
+    }));
+    // Как шёл вход и подпись внутри библиотек (isideload, idevice): уровень «инфо» и выше — каждая
+    // строка через clean (адрес Apple ID в «Logging in to Apple ID: …» станет «<почта>»).
+    let _ = tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::INFO)
+        .with_ansi(false)
+        .without_time()
+        .with_writer(|| Lib(Vec::new()))
+        .try_init();
+}
+
+/// Строки библиотек — в журнал с пометкой «библиотека».
+struct Lib(Vec<u8>);
+impl Write for Lib {
+    fn write(&mut self, b: &[u8]) -> std::io::Result<usize> { self.0.extend_from_slice(b); Ok(b.len()) }
+    fn flush(&mut self) -> std::io::Result<()> { Ok(()) }
+}
+impl Drop for Lib {
+    fn drop(&mut self) {
+        let text = String::from_utf8_lossy(&self.0);
+        for l in text.lines().filter(|l| !l.trim().is_empty()) { line(&format!("библиотека: {}", l.trim())); }
+    }
+}
+
+/// Система: на Windows — номер сборки («Windows 10.0.22631»), иначе — имя.
+fn system() -> String {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        // Без окна консоли (CREATE_NO_WINDOW): программа с окном, мелькание чёрного окна пугает.
+        if let Ok(out) = std::process::Command::new("cmd").args(["/c", "ver"]).creation_flags(0x0800_0000).output() {
+            let v = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            if !v.is_empty() { return v; }
+        }
+    }
+    std::env::consts::OS.to_string()
 }
 
 /// Строка журнала: время, секунды от начала сеанса, текст без личного.
 pub fn line(text: &str) {
-    let Some(log) = LOG.get() else { return };
-    let Ok(log) = log.lock() else { return };
+    let Ok(guard) = LOG.lock() else { return };
+    let Some(log) = guard.as_ref() else { return };
     let secs = log.started.elapsed().as_secs_f32();
     let stamp = now();
     if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&log.file) {
@@ -56,17 +98,18 @@ pub fn line(text: &str) {
 /// Событие окну — в журнал словами; длительность шага — от «идёт» до итога.
 pub fn event(e: &Event) {
     let text = describe(e);
-    if let (Event::Step { id, state, .. }, Some(log)) = (e, LOG.get()) {
-        if let Ok(mut log) = log.lock() {
-            match state {
-                StepState::Running => { log.running.entry(*id).or_insert_with(Instant::now); }
-                _ => if let Some(t) = log.running.remove(id) {
-                    drop(log);
-                    line(&format!("{text} ({})", secs(t.elapsed())));
-                    return;
+    if let Event::Step { id, state, .. } = e {
+        let took = match LOG.lock() {
+            Ok(mut guard) => match guard.as_mut() {
+                Some(log) => match state {
+                    StepState::Running => { log.running.entry(*id).or_insert_with(Instant::now); None }
+                    _ => log.running.remove(id).map(|t| t.elapsed()),
                 },
-            }
-        }
+                None => None,
+            },
+            Err(_) => None,
+        };
+        if let Some(d) = took { line(&format!("{text} ({})", secs(d))); return; }
     }
     line(&text);
 }
@@ -124,6 +167,7 @@ pub async fn probe_servers() {
 /// Без адресов почты и номеров телефонов. Числа короче семи цифр (коды ошибок Apple, время,
 /// проценты) остаются; маски Apple вида «(•••) •••-••-56» не трогаются — в них номера уже нет.
 pub fn clean(text: &str) -> String {
+    let text = &tokens(text);
     // Почта: слово с «@» и точкой после него.
     let words: Vec<String> = text
         .split_inclusive(|c: char| c.is_whitespace() || "\"',;{}()[]<>".contains(c))
@@ -164,6 +208,23 @@ pub fn clean(text: &str) -> String {
     clean
 }
 
+/// Длинные токены (сеансы, ключи, отпечатки — от 24 знаков латиницы, цифр и «+/=_-» подряд) — в заглушку.
+fn tokens(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut run = String::new();
+    let flush = |run: &mut String, out: &mut String| {
+        if run.chars().count() >= 24 && run.chars().any(|c| c.is_ascii_digit()) && run.chars().any(|c| c.is_ascii_alphabetic()) {
+            out.push_str("<токен>");
+        } else { out.push_str(run); }
+        run.clear();
+    };
+    for c in text.chars() {
+        if c.is_ascii_alphanumeric() || "+/=_-".contains(c) { run.push(c) } else { flush(&mut run, &mut out); out.push(c); }
+    }
+    flush(&mut run, &mut out);
+    out
+}
+
 fn now() -> String {
     // Время без зависимостей: секунды от начала эпохи → «ГГГГ-ММ-ДД ЧЧ:ММ:СС» (UTC).
     let s = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0) as i64;
@@ -201,6 +262,9 @@ pub fn save(work: &Path, to: &Path) -> std::io::Result<PathBuf> {
 mod tests {
     use super::*;
 
+    /// Журнал один на процесс — тесты с ним по очереди.
+    static SERIAL: Mutex<()> = Mutex::new(());
+
     #[test]
     fn почта_и_телефоны_вычищаются_а_коды_ошибок_остаются() {
         let s = clean(r#"AuthFailed { code: -20101, account: "Person.Name@icloud.com", phone: "+996 555 123 456", alt: 0555 12-34-56, ec: -22421, at 87 % }"#);
@@ -219,6 +283,7 @@ mod tests {
 
     #[test]
     fn журнал_пишется_и_сохраняется_без_личного() {
+        let _g = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
         let work = std::env::temp_dir().join(format!("osmotr-tel-{}", std::process::id()));
         init(&work, "тест");
         event(&Event::Step { id: StepId::AppleId, state: StepState::Running, note: "входим".into() });
@@ -228,6 +293,26 @@ mod tests {
         assert!(t.contains("шаг «Вход в Apple ID»: идёт входим"), "{t}");
         assert!(t.contains("ОСТАНОВИЛИСЬ: Apple не пустила войти") && t.contains("-20209"), "{t}");
         assert!(!t.contains("a.b@icloud.com"), "{t}");
+        let _ = std::fs::remove_dir_all(&work);
+    }
+
+    #[test]
+    fn токены_вычищаются_а_слова_и_коды_нет() {
+        let s = clean("session X-Apple-ID-Session-Id: 3F2504E04F8911D39A0C0305E82C3301aa dsid=-20101 Logging in to Apple ID: a.b@icloud.com");
+        assert!(s.contains("<токен>") && !s.contains("3F2504E0"), "{s}");
+        assert!(s.contains("-20101") && s.contains("<почта>") && s.contains("Logging in to Apple ID"), "{s}");
+    }
+
+    #[test]
+    fn строки_библиотеки_проходят_очистку() {
+        let _g = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+        let work = std::env::temp_dir().join(format!("osmotr-lib-{}", std::process::id()));
+        init(&work, "тест");
+        tracing::info!("Logging in to Apple ID: {}", "Person.Name@icloud.com");
+        tracing::info!("SMS 2FA required");
+        let t = std::fs::read_to_string(work.join("telemetry/log.txt")).unwrap();
+        assert!(t.contains("библиотека:") && t.contains("SMS 2FA required"), "{t}");
+        assert!(!t.to_lowercase().contains("person.name"), "{t}");
         let _ = std::fs::remove_dir_all(&work);
     }
 

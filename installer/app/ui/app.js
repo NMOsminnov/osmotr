@@ -3,6 +3,10 @@
 const { invoke } = window.__TAURI__.core;
 const { listen } = window.__TAURI__.event;
 
+// Ошибки в самом окне — в журнал установки (без ввода человека: только сообщение и место).
+window.addEventListener('error', (e) => { invoke('log_ui', { text: `${e.message} @ ${e.filename?.split('/').pop()}:${e.lineno}` }).catch(() => {}); });
+window.addEventListener('unhandledrejection', (e) => { invoke('log_ui', { text: `обещание: ${e.reason}` }).catch(() => {}); });
+
 const stepsEl = document.getElementById('steps');
 const stage = document.getElementById('stage');
 const rows = {};

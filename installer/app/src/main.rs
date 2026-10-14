@@ -71,6 +71,10 @@ fn save_diagnostics(app: tauri::AppHandle) -> Result<String, String> {
     osmotr_setup::telemetry::save(&work_dir(), &desktop).map(|p| p.display().to_string()).map_err(|e| e.to_string())
 }
 
+/// Ошибка в самом окне (скрипт) — в журнал телеметрии.
+#[tauri::command]
+fn log_ui(text: String) { osmotr_setup::telemetry::line(&format!("окно: {text}")); }
+
 /// Шаги — подписи для окна (одни на ядро и окно).
 #[tauri::command]
 fn steps() -> Vec<(osmotr_setup::StepId, &'static str)> {
@@ -85,7 +89,7 @@ fn main() {
             if let Some(w) = app.get_webview_window("main") { let _ = w.set_focus(); }
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![start, answer, steps, save_diagnostics])
+        .invoke_handler(tauri::generate_handler![start, answer, steps, save_diagnostics, log_ui])
         .run(tauri::generate_context!())
         .expect("окно установки не открылось");
 }
