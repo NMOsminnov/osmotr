@@ -4,6 +4,6 @@ resolver = "2"
 members = ["core", "app"]
 
 [workspace.package]
-version = "0.2.6"
+version = "0.2.7"
 edition = "2024"
 license = "MIT"
