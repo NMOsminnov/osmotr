@@ -13,8 +13,8 @@ targets:
       path: iosApp/Info.plist
       properties:
         CFBundleDisplayName: Осмотр
-        CFBundleShortVersionString: "3.0"
-        CFBundleVersion: "1"
+        CFBundleShortVersionString: "3.4"
+        CFBundleVersion: "11"
         UILaunchScreen:
           UIColorName: LaunchBackground
         # «Открыть в «Осмотр»» и «Поделиться» из WhatsApp, «Файлов», почты: опись Excel.
@@ -23,7 +23,8 @@ targets:
             CFBundleTypeRole: Viewer
             LSHandlerRank: Alternate
             LSItemContentTypes: [org.openxmlformats.spreadsheetml.sheet, com.microsoft.excel.xls]
-        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+        # Поворот — как на Android с 3.4: таблицы лёжа (панель справа), всё остальное тоже.
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
         # Разрешения — по одному, когда нужны, и с честной подписью (App Review 5.1.1).
         NSCameraUsageDescription: Снимки оборудования при осмотре
         NSMicrophoneUsageDescription: Голосовые заметки к папкам и описям
@@ -35,8 +36,8 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: kg.osmotr.app
-        MARKETING_VERSION: "3.0"
-        CURRENT_PROJECT_VERSION: "1"
+        MARKETING_VERSION: "3.4"
+        CURRENT_PROJECT_VERSION: "11"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         CODE_SIGNING_ALLOWED: "NO"
         CODE_SIGNING_REQUIRED: "NO"
