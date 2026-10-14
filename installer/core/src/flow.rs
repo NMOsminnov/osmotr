@@ -129,7 +129,8 @@ async fn steps(ctx: &Ctx) -> R<Vec<String>> {
     }
     ctx.hint_done();
     let phone = phone::describe(device).await?;
-    ctx.step(StepId::Trust, StepState::Done, format!("{} · iOS {}", phone.name, phone.version));
+    // Без имени телефона: в нём бывает имя владельца, а подпись шага идёт и в телеметрию.
+    ctx.step(StepId::Trust, StepState::Done, format!("iOS {}", phone.version));
 
     // 4. Режим разработчика — до Apple ID: перезагрузка в начале, и без входа можно проверить.
     ctx.step(StepId::DevMode, StepState::Running, "Проверяем");
@@ -151,7 +152,18 @@ async fn steps(ctx: &Ctx) -> R<Vec<String>> {
         ctx.step(StepId::AppleId, StepState::Running, "Входим");
         match account::login(ctx, &email, &password, &store).await {
             Ok(s) => break (email, password, s),
-            Err(f) => { error = Some(f.text.clone()); ctx.step(StepId::AppleId, StepState::Running, f.text) }
+            Err(f) => {
+                // Причина с кодом Apple — в журнал (подробности уже без личного: account::without_personal).
+                crate::telemetry::line(&format!("вход не прошёл: {} — {}", f.text, f.detail));
+                // Не пароль, не блокировка и не сеть — следующая попытка с чистого состояния подписи
+                // запросов (anisette): сохранённое с прошлых попыток бывает испорчено, и Apple отказывает
+                // сразу, ещё до кода (14.10.2026: «Loaded existing anisette state» — и отказ за 1,6 с).
+                if account::stale_anisette_suspected(&f) && account::reset_anisette(&store) {
+                    crate::telemetry::line("вход: состояние подписи запросов сброшено — следующая попытка с чистого");
+                }
+                error = Some(f.text.clone());
+                ctx.step(StepId::AppleId, StepState::Running, f.text)
+            }
         }
     };
     ctx.step(StepId::AppleId, StepState::Done, email.clone());

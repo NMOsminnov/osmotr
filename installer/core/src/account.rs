@@ -110,6 +110,16 @@ fn without_personal(detail: &str, email: &str) -> String {
     clean
 }
 
+/// Отказ, в котором виновато, похоже, состояние подписи запросов, а не пароль, блокировка или сеть.
+pub fn stale_anisette_suspected(f: &Failure) -> bool { f.text == "Apple не пустила войти" }
+
+/// Сбросить состояние подписи запросов (anisette) — его установщик хранит сам и получит заново.
+/// Сертификат подписи и прочее в папке не трогаются. true — было что сбрасывать.
+pub fn reset_anisette(store: &Path) -> bool {
+    let dir = store.join("anisette");
+    dir.exists() && std::fs::remove_dir_all(&dir).is_ok()
+}
+
 /// Отказ входа — по-человечески: неверный пароль, заблокированный Apple ID, нет сети.
 fn login_failure(detail: &str, email: &str) -> Failure {
     let detail = without_personal(detail, email);
@@ -129,7 +139,21 @@ fn login_failure(detail: &str, email: &str) -> Failure {
 
 #[cfg(test)]
 mod tests {
-    use super::without_personal;
+    use super::{login_failure, reset_anisette, stale_anisette_suspected, without_personal};
+
+    #[test]
+    fn сброс_подписи_запросов_только_при_неясном_отказе() {
+        assert!(stale_anisette_suspected(&login_failure("Bad(Unknown { code: -36607 })", "")));
+        assert!(!stale_anisette_suspected(&login_failure("Bad { code: -20101 }", "")));
+        assert!(!stale_anisette_suspected(&login_failure("dns error: timed out", "")));
+        let store = std::env::temp_dir().join(format!("osmotr-ani-{}", std::process::id()));
+        std::fs::create_dir_all(store.join("anisette")).unwrap();
+        std::fs::create_dir_all(store.join("signing")).unwrap();
+        assert!(reset_anisette(&store));
+        assert!(!store.join("anisette").exists() && store.join("signing").exists(), "сертификат подписи не трогается");
+        assert!(!reset_anisette(&store), "второй раз — нечего сбрасывать");
+        let _ = std::fs::remove_dir_all(&store);
+    }
 
     #[test]
     fn personal_data_never_reaches_details() {
