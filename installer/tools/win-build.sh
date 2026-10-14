@@ -20,6 +20,6 @@ if [ ! -f "$W/bundle/ipatool.exe" ]; then
 fi
 cd /mnt/c
 powershell.exe -NoProfile -Command "\$env:Path += \";\$env:USERPROFILE\\.cargo\\bin\"; \$env:OSMOTR_IPA='$WW\\bundle\\Osmotr.ipa'; \$env:IPATOOL_EXE='$WW\\bundle\\ipatool.exe'; Set-Location '$WW\\installer'; cargo test -q -p osmotr-setup 2>&1 | Select-String -Pattern 'test result|^error|FAILED' ; cargo build --release -p osmotr-setup-app --features bundled 2>&1 | Select-String -Pattern '^error' -Context 0,8; if (-not (Test-Path target\\release\\osmotr-setup-app.exe)) { exit 1 }"
-desk=$(powershell.exe -NoProfile -Command "[Environment]::GetFolderPath('Desktop')" | tr -d '\r')
+desk=$(powershell.exe -NoProfile -Command "[Console]::OutputEncoding=[Text.Encoding]::UTF8; [Environment]::GetFolderPath('Desktop')" | tr -d '\r')
 cp "$W/installer/target/release/osmotr-setup-app.exe" "$(wslpath "$desk")/$name"
 ls -la "$(wslpath "$desk")/$name"
