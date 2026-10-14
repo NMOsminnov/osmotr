@@ -154,7 +154,7 @@ async fn steps(ctx: &Ctx) -> R<Vec<String>> {
             Ok(s) => break (email, password, s),
             Err(f) => {
                 // Причина с кодом Apple — в журнал (подробности уже без личного: account::without_personal).
-                crate::telemetry::line(&format!("вход не прошёл: {} — {}", f.text, f.detail));
+                crate::telemetry::line(&format!("вход не прошёл: {} — полный текст ошибки: {}", f.text, f.detail));
                 // Не пароль, не блокировка и не сеть — следующая попытка с чистого состояния подписи
                 // запросов (anisette): сохранённое с прошлых попыток бывает испорчено, и Apple отказывает
                 // сразу, ещё до кода (14.10.2026: «Loaded existing anisette state» — и отказ за 1,6 с).

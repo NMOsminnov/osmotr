@@ -20,7 +20,7 @@ serde_json = "1"
 thiserror = "2"
 tracing = "0.1"
 # Внутренний журнал isideload и idevice — в телеметрию установщика (telemetry.rs), через очистку от личного.
-tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "std"] }
+tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "std", "registry"] }
 uuid = { version = "1", features = ["v4"] }
 
 [target.'cfg(windows)'.dependencies]

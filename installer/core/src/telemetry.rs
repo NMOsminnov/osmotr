@@ -49,11 +49,12 @@ pub fn init(work: &Path, about: &str) {
     }));
     // Как шёл вход и подпись внутри библиотек (isideload, idevice): уровень «инфо» и выше — каждая
     // строка через clean (адрес Apple ID в «Logging in to Apple ID: …» станет «<почта>»).
-    let _ = tracing_subscriber::fmt()
-        .with_max_level(tracing::Level::INFO)
-        .with_ansi(false)
-        .without_time()
-        .with_writer(|| Lib(Vec::new()))
+    // Вход (isideload) — подробно, уровень «отладка»: запросы к Apple, ответы и коды — «нужен полный
+    // лог ошибки» (автор, 14.10.2026); прочие библиотеки — «инфо» (связь с телефоном шумит).
+    use tracing_subscriber::{filter::Targets, layer::SubscriberExt, util::SubscriberInitExt};
+    let _ = tracing_subscriber::registry()
+        .with(tracing_subscriber::fmt::layer().with_ansi(false).without_time().with_writer(|| Lib(Vec::new())))
+        .with(Targets::new().with_default(tracing::Level::INFO).with_target("isideload", tracing::Level::DEBUG))
         .try_init();
 }
 
