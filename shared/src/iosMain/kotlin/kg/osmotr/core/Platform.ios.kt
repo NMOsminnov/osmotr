@@ -216,7 +216,7 @@ actual object Platform {
     /** Модель железа — «iPhone15,2» (uname): «iPhone» из UIDevice по ней не различить. */
     @OptIn(ExperimentalForeignApi::class)
     actual fun hardware(): String = kotlinx.cinterop.memScoped {
-        val u = kotlinx.cinterop.alloc<platform.posix.utsname>()
+        val u = alloc<platform.posix.utsname>()
         platform.posix.uname(u.ptr)
         u.machine.toKString()
     }

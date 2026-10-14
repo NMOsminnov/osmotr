@@ -155,9 +155,10 @@ fun BrowserScreen(
     var movingFolder by remember { mutableStateOf(false) }
     var editingNote by remember { mutableStateOf(false) }
     var recording by remember { mutableStateOf(false) }
-    val voices by produceState(emptyList<File>(), dir, version) { if (dir.isDirectory) value = withContext(Dispatchers.IO) { Store.voiceNotes(dir) } }
-    val note by produceState<String?>(null, dir, version) { if (dir.isDirectory) value = withContext(Dispatchers.IO) { Store.note(dir) } }
-    val people by produceState(emptyList<Store.Contact>(), dir, version) { if (dir.isDirectory) value = withContext(Dispatchers.IO) { Store.contacts(dir) } }
+    // Записи, комментарий и контакты папки — с прежним сразу (подгружаясь следом, толкали плитки вниз).
+    val voices = rememberLoaded("записи|${dir.path}", version) { if (dir.isDirectory) Store.voiceNotes(dir) else emptyList() } ?: emptyList()
+    val note = rememberLoaded("комментарий|${dir.path}", version) { if (dir.isDirectory) Store.note(dir) else null }
+    val people = rememberLoaded("контакты|${dir.path}", version) { if (dir.isDirectory) Store.contacts(dir) else emptyList() } ?: emptyList()
     // Опись объекта (если она в этой папке) и предметы описи, лежащие в этой папке; прошлое — сразу.
     val card by produceState(Visited.card[dir], dir, version) {
         withContext(Dispatchers.IO) { if (dir.isDirectory) cardOf(dir) else null }?.let { value = it; Visited.card[dir] = it }
@@ -181,7 +182,7 @@ fun BrowserScreen(
     }
     // Прогресс описей у папок (на главном — описи карточками).
     // Сначала — какие папки описи (быстро, чтобы не прыгали из плиток в строки), потом — сколько осмотрено.
-    val progress by produceState(emptyMap<File, Pair<Int, Int>?>(), listing) {
+    val progress by produceState(ScreenCache.get<Map<File, Pair<Int, Int>?>>("прогресс|${dir.path}") ?: emptyMap(), listing) {
         val l = listing ?: return@produceState
         // Пока пересчитывается — прежние цифры, а не «Открываем…» у всех строк (список не мигает).
         val was = value
@@ -192,6 +193,7 @@ fun BrowserScreen(
                 t.dir to (items.count(st::inspected) to items.size)
             }.getOrNull() } }.toMap()
         }
+        ScreenCache.put("прогресс|${dir.path}", value)
     }
     val selecting = selected.isNotEmpty()
     // Порядок на экране — папки, затем снимки: по нему выбор протяжкой отмечает диапазон.
@@ -489,7 +491,7 @@ private fun Breadcrumbs(dir: File, goTo: (File) -> Unit) {
 private fun FolderCard(tile: Store.FolderTile, selected: Boolean, onClick: () -> Unit) {
     // Снимок сверху, подпись под ним: имя поверх пёстрой обложки не читалось.
     val shape = RoundedCornerShape(16.dp)
-    Column(Modifier.panel(shape, tint = if (selected) MaterialTheme.colorScheme.primaryContainer else null).clickable(onClick = onClick)) {
+    Column(Modifier.testTag("плитка").panel(shape, tint = if (selected) MaterialTheme.colorScheme.primaryContainer else null).clickable(onClick = onClick)) {
         Box(Modifier.fillMaxWidth().aspectRatio(1.25f).background(MaterialTheme.colorScheme.surfaceVariant), contentAlignment = Alignment.Center) {
             tile.cover?.let { cover ->
                 AsyncImage(thumbRequest(cover), contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
@@ -569,7 +571,7 @@ private fun ItemCard(items: List<Inventory.Item>, similar: List<Inventory.Item>,
                     FilterChip(off, { haptic.performHapticFeedback(if (off) HapticFeedbackType.ToggleOff else HapticFeedbackType.ToggleOn); setBroken(i, !off) }, {
                         Text(when { off -> "Нерабочее, на списание"; can -> "Отметить: нерабочее"; else -> "Нерабочее — сначала снимки" },
                             color = if (off) BROKEN_RED else Color.Unspecified)
-                    }, Modifier.testTag("чип нерабочее"), enabled = can || off,
+                    }, Modifier.testTag("чип нерабочее").animateContentSize(motion()), enabled = can || off,
                         leadingIcon = { Icon(AppIcons.Block, null, Modifier.size(18.dp), tint = if (off) BROKEN_RED else MaterialTheme.colorScheme.onSurfaceVariant) },
                         colors = FilterChipDefaults.filterChipColors(selectedContainerColor = BROKEN_RED.copy(alpha = 0.18f)))
                     // Осмотрено без снимков (импорт или вручную, автор: «отметить как осмотренное — нужна»):
@@ -577,7 +579,7 @@ private fun ItemCard(items: List<Inventory.Item>, similar: List<Inventory.Item>,
                     val mark = earlier(i)
                     if (mark || !can) FilterChip(mark, { haptic.performHapticFeedback(if (mark) HapticFeedbackType.ToggleOff else HapticFeedbackType.ToggleOn); setEarlier(i, !mark) }, {
                         Text(if (mark) "Осмотрено — снять отметку" else "Отметить осмотренным", color = if (mark) DONE_GREEN else Color.Unspecified)
-                    }, Modifier.testTag("чип осмотрено"), leadingIcon = { Icon(if (mark) Icons.Default.Close else Icons.Default.Check, null, Modifier.size(18.dp),
+                    }, Modifier.testTag("чип осмотрено").animateContentSize(motion()), leadingIcon = { Icon(if (mark) Icons.Default.Close else Icons.Default.Check, null, Modifier.size(18.dp),
                         tint = if (mark) DONE_GREEN else MaterialTheme.colorScheme.onSurfaceVariant) },
                         colors = FilterChipDefaults.filterChipColors(selectedContainerColor = DONE_GREEN.copy(alpha = 0.16f)))
                 }

@@ -1,5 +1,10 @@
 package kg.osmotr.ui
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -69,7 +74,7 @@ fun usedWidth(sheet: Xlsx.Sheet): Int {
 enum class RowLook { HEADER, ABOVE, ITEM, OTHER }
 
 /** Подпись над столбцом: какое поле в нём и указано ли оно человеком (иначе — подбор). */
-class ColumnMark(val label: String, val manual: Boolean)
+data class ColumnMark(val label: String, val manual: Boolean)
 
 /** Короткие названия полей — для подписей над столбцами. */
 fun shortTitle(f: Inventory.Field) = when (f) {
@@ -117,10 +122,13 @@ fun SheetGrid(
                         .clickable { onColumn(col) }.testTag("столбец ${Inventory.letter(col)}"),
                         horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
                         Text(Inventory.letter(col), fontWeight = FontWeight.SemiBold, color = if (on) c.onPrimary else c.onSurfaceVariant)
-                        if (m != null) Text(m.label, Modifier.testTag("подпись столбца").padding(top = 2.dp).clip(RoundedCornerShape(6.dp))
-                            .background(if (m.manual) c.tertiary else c.secondaryContainer).padding(horizontal = 6.dp),
-                            style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                            color = if (m.manual) c.onTertiary else c.onSecondaryContainer)
+                        // Подпись сменилась (указали поле) — перекрёстно, а не за кадр (матрица движения: РЫВОК).
+                        AnimatedContent(m, transitionSpec = { fadeIn(motion()) togetherWith fadeOut(motion()) }, label = "подпись") { mark ->
+                            if (mark != null) Text(mark.label, Modifier.testTag("подпись столбца").padding(top = 2.dp).clip(RoundedCornerShape(6.dp))
+                                .background(if (mark.manual) c.tertiary else c.secondaryContainer).padding(horizontal = 6.dp),
+                                style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                color = if (mark.manual) c.onTertiary else c.onSecondaryContainer)
+                        }
                     }
                 }
             }
@@ -216,7 +224,8 @@ fun TableFrame(
                 grid(Modifier.weight(1f))
                 Surface(Modifier.fillMaxWidth().testTag("панель"), tonalElevation = 3.dp) {
                     Column {
-                        Column(Modifier.heightIn(max = panelH).verticalScroll(rememberScrollState()).padding(start = 16.dp, end = 16.dp, top = 12.dp),
+                        // Итог пересчитался (предупреждения появились, ушли) — панель растёт плавно, таблица над ней не прыгает.
+                        Column(Modifier.animateContentSize(motion()).heightIn(max = panelH).verticalScroll(rememberScrollState()).padding(start = 16.dp, end = 16.dp, top = 12.dp),
                             verticalArrangement = Arrangement.spacedBy(6.dp), content = panel)
                         Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp), content = footer)
                     }

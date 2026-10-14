@@ -11,6 +11,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextClearance
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.isRoot
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.test.core.app.ApplicationProvider
@@ -54,7 +55,7 @@ class OsmotrMotionTest {
     private val frameMs = 16L
     private val blocks = listOf(
         "шапка", "строка описи", "метка осмотрено", "метка нерабочее", "карточка предмета", "чип осмотрено", "чип нерабочее",
-        "таблица", "панель", "подпись столбца", "проверьте столбцы",
+        "таблица", "панель", "подпись столбца", "проверьте столбцы", "сводка описи", "плитка", "комментарий",
     )
 
     /** Действие: подготовка (без замера), само действие, события по кадрам, возврат как было. */
@@ -68,6 +69,13 @@ class OsmotrMotionTest {
         val repeats: Int = 3,
         /** Задуманные флаги: «блок флаг» или «блок·n флаг». */
         val expected: Set<String> = emptySet(),
+        /**
+         * Спокойное действие: содержимое то же (обновились данные, вернулись на экран) — ничто не
+         * должно двигаться, проявляться или пропадать после первых двух кадров (автор, 14.10.2026:
+         * «Каждое обновление экрана вызывает анимацию появления»). Нарушение — флаг ЛИШНЕЕ;
+         * обычные флаги здесь не к месту (мгновенное появление при переходе — как задумано).
+         */
+        val calm: Boolean = false,
     )
 
     private val host = object : Host {
@@ -129,9 +137,30 @@ class OsmotrMotionTest {
             }
             compose.mainClock.autoAdvance = true
             a.undo(compose); settle(800)
-            Analysis.analyze(take, a.expected)
+            if (a.calm) calm(take) else Analysis.analyze(take, a.expected)
         }
         return ActionResult(a.name, takes, Analysis.disagreement(takes)).also { results += it }
+    }
+
+    /** ЛИШНЕЕ: после второго кадра блок возник, пропал, проявлялся или сдвинулся. */
+    private fun calm(take: Take): TakeResult {
+        val n = take.frames.size
+        val found = mutableListOf<Finding>()
+        for ((tag, list) in Analysis.tracks(take)) list.forEachIndexed { k, t ->
+            val why = mutableListOf<String>()
+            if (t.first > 2) why += "возник на кадре ${t.first}"
+            // Пропал в первых кадрах — уходящий экран при переходе (так и задумано); позже — лишнее.
+            if (t.last < n - 1 && t.last >= 2) why += "пропал на кадре ${t.last + 1}"
+            val alpha = t.values.firstOrNull()?.get(Prop.A.ordinal)
+            if (alpha != null && !alpha.isNaN() && alpha < 0.9f) why += "проявлялся (видимость ${Analysis.fmt(alpha)})"
+            val settled = t.values.drop(maxOf(0, 3 - t.first))
+            for (p in Prop.entries) {
+                val v = settled.map { it[p.ordinal] }.filter { !it.isNaN() }
+                if (v.isNotEmpty() && v.max() - v.min() > p.eps) why += "${p.title} ${Analysis.fmt(v.min())}…${Analysis.fmt(v.max())}"
+            }
+            if (why.isNotEmpty()) found += Finding(tag, k + 1, null, "ЛИШНЕЕ", why.joinToString("; "))
+        }
+        return TakeResult(found, emptyMap(), n, take.alphaKnown)
     }
 
     private fun ComposeContentTestRule.tapText(t: String) = onAllNodes(hasText(t), useUnmergedTree = true).onFirst().performClick()
@@ -145,6 +174,10 @@ class OsmotrMotionTest {
             act = { onAllNodes(hasText("Шкаф металлический 1"), useUnmergedTree = true).onFirst().performTouchInput { down(center) } },
             during = mapOf(45 to { onAllNodes(hasText("Шкаф металлический 1"), useUnmergedTree = true).onFirst().performTouchInput { up() } }),
             undo = { tapDesc("Снять выбор") }, recordMs = 1400))
+        run(Act("опись: данные обновились, содержимое то же", act = { Store.changed() }, calm = true, recordMs = 1500))
+        run(Act("опись: вернулись из папки предмета",
+            prepare = { onAllNodes(hasText("Шкаф металлический 4"), useUnmergedTree = true).onFirst().performClick() },
+            act = { onAllNodes(hasContentDescription("Назад")).onFirst().performClick() }, calm = true, recordMs = 1500))
         run(Act("опись: «Осмотрено (1)» — метка у предмета",
             prepare = { longPress("Шкаф металлический 2") },
             act = { tapText("Осмотрено (1)") },
@@ -172,11 +205,20 @@ class OsmotrMotionTest {
             undo = { onAllNodes(hasText("Опись  ·", substring = true), useUnmergedTree = true).onFirst().performClick() }))
     }
 
+    @Test fun папка_описи() {
+        val obj = inventory("Склад")
+        val items = Inventory.parse(Inventory.fileIn(obj)!!).items
+        Inventory.openFolder(obj, items[0]); Store.setNote(obj, "ключ у охраны")
+        show(Screen.Browser(obj))
+        run(Act("папка описи: данные обновились, содержимое то же", act = { Store.changed() }, calm = true, recordMs = 1500))
+    }
+
     @Test fun карточка() {
         val obj = inventory("Склад")
         val item = Inventory.parse(Inventory.fileIn(obj)!!).items.first { it.inventory == "МТ-103" }
         val dir = Inventory.openFolder(obj, item)
         show(Screen.Inventory(obj), Screen.Browser(dir))
+        run(Act("карточка: данные обновились, содержимое то же", act = { Store.changed() }, calm = true, recordMs = 1500))
         run(Act("карточка: отметить осмотренным",
             act = { tapText("Отметить осмотренным") },
             undo = { tapText("Осмотрено — снять отметку") }))

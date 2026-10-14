@@ -51,7 +51,7 @@ import androidx.compose.ui.unit.dp
 fun ViewerScreen(dir: File, start: File, close: () -> Unit) {
     val host = LocalHost.current
     val version by Store.version.collectAsStateWithLifecycle()
-    val photos by produceState<List<File>?>(null, dir, version) { value = withContext(Dispatchers.IO) { Store.photosIn(dir) } }
+    val photos = rememberLoaded("снимки|${dir.path}", version) { Store.photosIn(dir) }
     val list = photos ?: return Box(Modifier.fillMaxSize().background(Color.Black))
     if (list.isEmpty()) { close(); return }
     val pager = rememberPagerState(initialPage = list.indexOf(start).coerceAtLeast(0)) { list.size }

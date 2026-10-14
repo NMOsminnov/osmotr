@@ -75,6 +75,10 @@ import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.Lifecycle
 import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.shrinkHorizontally
+import androidx.compose.animation.expandHorizontally
+import androidx.compose.animation.togetherWith
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
@@ -156,20 +160,22 @@ fun InventoryScreen(obj: File, into: File? = null, initialQuery: String? = null,
     var reparse by remember { mutableStateOf(0) }
     // previous — есть прежний файл описи (заменили — можно вернуть); warnings — что в прочитанном подозрительно.
     data class Data(val parsed: List<Inventory.Parsed>, val status: Inventory.Status, val previous: Boolean, val warnings: List<String>)
-    val data by produceState<Data?>(null, obj, version, reparse) {
-        value = withContext(Dispatchers.IO) {
-            // Отчёт — свежий, но в фоне: список не ждёт его секунды.
-            val parsed = Inventory.filesIn(obj).map { Inventory.parse(it) }
-            val items = parsed.flatMap { it.items }
-            Data(parsed, Inventory.status(obj), Inventory.hasPrevious(obj), if (items.isEmpty()) emptyList() else Inventory.itemWarnings(items))
-                .also { Inventory.refreshReportSoon(obj) }
-        }
-        // Поиск — приготовить заранее, пока человек смотрит список.
-        value?.let { d -> withContext(Dispatchers.Default) {
+    // Прежнее — сразу (вернулись на опись — список на месте, а не проявляется заново), свежее — следом.
+    val data = rememberLoaded("опись|${obj.path}", version, reparse) {
+        // Отчёт — свежий, но в фоне: список не ждёт его секунды.
+        val parsed = Inventory.filesIn(obj).map { Inventory.parse(it) }
+        val items = parsed.flatMap { it.items }
+        Data(parsed, Inventory.status(obj), Inventory.hasPrevious(obj), if (items.isEmpty()) emptyList() else Inventory.itemWarnings(items))
+            .also { Inventory.refreshReportSoon(obj) }
+    }
+    // Поиск — приготовить заранее, пока человек смотрит список.
+    LaunchedEffect(data) {
+        val d = data ?: return@LaunchedEffect
+        withContext(Dispatchers.Default) {
             val t0 = Platform.nowMs(); val items = d.parsed.flatMap { it.items }
             Search.prepare(items)
             kg.osmotr.core.Telemetry.log("поиск готов: ${items.size} предметов, ${Platform.nowMs() - t0} мс")
-        } }
+        }
     }
     fun d0() = data
     val selected = remember(obj) { mutableStateListOf<Inventory.Item>() }
@@ -193,9 +199,10 @@ fun InventoryScreen(obj: File, into: File? = null, initialQuery: String? = null,
     var replaceAsk by remember { mutableStateOf<Pair<Picked, Inventory.ReplaceCheck>?>(null) }
     // Импорт уже отсмотренного: имя файла и его листы (EarlierImport.kt).
     var earlier by remember { mutableStateOf<Pair<String, List<kg.osmotr.core.Xlsx.Sheet>>?>(null) }
-    val note by produceState<String?>(null, obj, version) { value = withContext(Dispatchers.IO) { Store.note(obj) } }
-    val voices by produceState(emptyList<File>(), obj, version) { value = withContext(Dispatchers.IO) { Store.voiceNotes(obj) } }
-    val people by produceState(emptyList<Store.Contact>(), obj, version) { value = withContext(Dispatchers.IO) { Store.contacts(obj) } }
+    // Комментарий, записи и контакты описи — тоже с прежним сразу: подгружаясь следом, они растили шапку и толкали список.
+    val note = rememberLoaded("комментарий|${obj.path}", version) { Store.note(obj) }
+    val voices = rememberLoaded("записи|${obj.path}", version) { Store.voiceNotes(obj) } ?: emptyList()
+    val people = rememberLoaded("контакты|${obj.path}", version) { Store.contacts(obj) } ?: emptyList()
 
     BackHandler(enabled = selected.isNotEmpty()) { selected.clear() }
     // Набор в папку: она переименовывается по составу — держим её текущее имя.
@@ -294,7 +301,8 @@ fun InventoryScreen(obj: File, into: File? = null, initialQuery: String? = null,
     // Окно столбцов само не всплывает: подбор решает сам; проверить и исправить — «Проверить опись».
 
     // Список на экране — в фоне: поиск с опечатками по 5–6 тыс. предметов не должен тормозить ввод.
-    val shown by produceState(emptyList<Inventory.Item>(), d, v.query, v.list, v.status, v.priority, v.onlyLeft, v.onlyBroken, v.sort, first) {
+    val shownKey = "строки|${obj.path}|${into != null}"
+    val shown by produceState(ScreenCache.get<List<Inventory.Item>>(shownKey) ?: emptyList(), d, v.query, v.list, v.status, v.priority, v.onlyLeft, v.onlyBroken, v.sort, first) {
         value = withContext(Dispatchers.Default) {
         val q = v.query.trim()
         var items = all.asSequence()
@@ -326,73 +334,80 @@ fun InventoryScreen(obj: File, into: File? = null, initialQuery: String? = null,
         }
         items
         }
+        // Описи ещё нет (первый кадр) — прежний список не затирать пустым.
+        if (d != null) ScreenCache.put(shownKey, value)
     }
 
     Scaffold(
         topBar = {
-            if (target != null) TopAppBar(
-                modifier = Modifier.testTag("шапка"),
-                navigationIcon = { IconButton(onClick = ::finish) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Готово") } },
-                title = { Column {
-                    Text(target!!.name, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Text("в папке: $count", style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
-                } },
-                actions = {
-                    val plus = pending.values.count { it.second }; val minus = pending.size - plus
-                    TextButton(onClick = ::finish, enabled = !applying) {
-                        Text("Готово" + listOfNotNull(plus.takeIf { it > 0 }?.let { " +$it" }, minus.takeIf { it > 0 }?.let { " −$it" }).joinToString(""))
-                    }
-                },
-            ) else if (selected.isNotEmpty()) TopAppBar(
-                modifier = Modifier.testTag("шапка"),
-                navigationIcon = { IconButton(onClick = { selected.clear() }) { Icon(Icons.Default.Close, "Снять выбор") } },
-                title = { Text("Отмечено: ${selected.size}") },
-                actions = {
-                    // Отметка «осмотрено» без снимков — поставить разом и снять разом (автор: «как отметить
-                    // невыполненным?», «отметить как осмотренное — нужна»).
-                    fun mark(items: List<Inventory.Item>, on: Boolean) {
-                        selected.clear()
-                        scope.launch {
-                            val n = withContext(Dispatchers.IO) { Inventory.setEarlier(obj, items, on).also { Inventory.refreshReportSoon(obj) } }
-                            host.toast((if (on) "Отмечено осмотренными: " else "Снята отметка «осмотрено»: ") + n); reparse++
+            // Шапка меняется перекрёстно (набор в папку, выделение, обычная), а не подменой за кадр:
+            // прежде выделение долгим нажатием дёргало всю шапку (матрица движения: ЗАМЕНЁН, РЫВОК).
+            val bar = when { target != null -> 0; selected.isNotEmpty() -> 1; else -> 2 }
+            AnimatedContent(bar, transitionSpec = { fadeIn(motion()) togetherWith fadeOut(motion()) }, label = "шапка") { mode ->
+                if (mode == 0) TopAppBar(
+                    modifier = Modifier.testTag("шапка"),
+                    navigationIcon = { IconButton(onClick = ::finish) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Готово") } },
+                    title = { Column {
+                        Text(target!!.name, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text("в папке: $count", style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+                    } },
+                    actions = {
+                        val plus = pending.values.count { it.second }; val minus = pending.size - plus
+                        TextButton(onClick = ::finish, enabled = !applying) {
+                            Text("Готово" + listOfNotNull(plus.takeIf { it > 0 }?.let { " +$it" }, minus.takeIf { it > 0 }?.let { " −$it" }).joinToString(""))
                         }
-                    }
-                    val нет = selected.filter { st?.inspected(it) == false }
-                    val снять = selected.filter { st?.earlier(it) == true }
-                    if (нет.isNotEmpty()) TextButton(onClick = { mark(нет.toList(), true) }) { Text("Осмотрено (${нет.size})") }
-                    if (снять.isNotEmpty()) TextButton(onClick = { mark(снять.toList(), false) }) { Text("Снять (${снять.size})") }
-                },
-            ) else TopAppBar(
-                modifier = Modifier.testTag("шапка"),
-                navigationIcon = { IconButton(onClick = close) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Назад") } },
-                title = { Column { Text(obj.name, maxLines = 1, overflow = TextOverflow.Ellipsis); Text("Опись", style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1) } },
-                actions = {
-                    // Выгрузка этой описи — отчёт, всё архивом, новое с прошлой выгрузки, за сегодня.
-                    if (!d?.parsed.isNullOrEmpty()) IconButton(onClick = { exporting = true }) { Icon(Icons.Default.Share, "Выгрузить опись") }
-                    // Папки этой описи — как раньше в «Осмотрах».
-                    IconButton(onClick = { folders(obj) }) { Icon(AppIcons.Folder, "Папки описи") }
-                    Box {
-                        IconButton(onClick = { menu = true }) { Icon(Icons.Default.MoreVert, "Ещё") }
-                        DropdownMenu(menu, { menu = false }) {
-                            DropdownMenuItem({ Text(if (note == null) "Добавить комментарий" else "Комментарий") },
-                                leadingIcon = { Icon(AppIcons.Notes, null) }, onClick = { menu = false; editingNote = true })
-                            DropdownMenuItem({ Text("Диктофон") }, leadingIcon = { Icon(AppIcons.Mic, null) }, onClick = { menu = false; recording = true })
-                            DropdownMenuItem({ Text("Контакты") }, leadingIcon = { Icon(Icons.Default.Person, null) }, onClick = { menu = false; contacts(obj) })
-                            if (!d?.parsed.isNullOrEmpty()) DropdownMenuItem({ Text("Импорт осмотренного") },
-                                leadingIcon = { Icon(AppIcons.Checklist, null) }, onClick = { menu = false; loadEarlier() })
-                            DropdownMenuItem({ Text(if (d?.parsed.isNullOrEmpty()) "Загрузить опись" else "Заменить файл описи") },
-                                leadingIcon = { Icon(AppIcons.UploadFile, null) }, onClick = { menu = false; load() })
-                            // Как прочитан файл описи — и поправить (не тот столбец, не тот лист, шапка не там).
-                            if (!d?.parsed.isNullOrEmpty()) DropdownMenuItem({ Text("Столбцы описи") },
-                                leadingIcon = { Icon(AppIcons.TableChart, null) }, onClick = { menu = false; columns = false })
-                            if (d?.previous == true) DropdownMenuItem({ Text("Вернуть прежний файл описи") },
-                                leadingIcon = { Icon(AppIcons.History, null) }, onClick = { menu = false; restore() })
+                    },
+                ) else if (mode == 1) TopAppBar(
+                    modifier = Modifier.testTag("шапка"),
+                    navigationIcon = { IconButton(onClick = { selected.clear() }) { Icon(Icons.Default.Close, "Снять выбор") } },
+                    title = { Text("Отмечено: ${selected.size}") },
+                    actions = {
+                        // Отметка «осмотрено» без снимков — поставить разом и снять разом (автор: «как отметить
+                        // невыполненным?», «отметить как осмотренное — нужна»).
+                        fun mark(items: List<Inventory.Item>, on: Boolean) {
+                            selected.clear()
+                            scope.launch {
+                                val n = withContext(Dispatchers.IO) { Inventory.setEarlier(obj, items, on).also { Inventory.refreshReportSoon(obj) } }
+                                host.toast((if (on) "Отмечено осмотренными: " else "Снята отметка «осмотрено»: ") + n); reparse++
+                            }
                         }
-                    }
-                },
-            )
+                        val нет = selected.filter { st?.inspected(it) == false }
+                        val снять = selected.filter { st?.earlier(it) == true }
+                        if (нет.isNotEmpty()) TextButton(onClick = { mark(нет.toList(), true) }) { Text("Осмотрено (${нет.size})") }
+                        if (снять.isNotEmpty()) TextButton(onClick = { mark(снять.toList(), false) }) { Text("Снять (${снять.size})") }
+                    },
+                ) else TopAppBar(
+                    modifier = Modifier.testTag("шапка"),
+                    navigationIcon = { IconButton(onClick = close) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Назад") } },
+                    title = { Column { Text(obj.name, maxLines = 1, overflow = TextOverflow.Ellipsis); Text("Опись", style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1) } },
+                    actions = {
+                        // Выгрузка этой описи — отчёт, всё архивом, новое с прошлой выгрузки, за сегодня.
+                        if (!d?.parsed.isNullOrEmpty()) IconButton(onClick = { exporting = true }) { Icon(Icons.Default.Share, "Выгрузить опись") }
+                        // Папки этой описи — как раньше в «Осмотрах».
+                        IconButton(onClick = { folders(obj) }) { Icon(AppIcons.Folder, "Папки описи") }
+                        Box {
+                            IconButton(onClick = { menu = true }) { Icon(Icons.Default.MoreVert, "Ещё") }
+                            DropdownMenu(menu, { menu = false }) {
+                                DropdownMenuItem({ Text(if (note == null) "Добавить комментарий" else "Комментарий") },
+                                    leadingIcon = { Icon(AppIcons.Notes, null) }, onClick = { menu = false; editingNote = true })
+                                DropdownMenuItem({ Text("Диктофон") }, leadingIcon = { Icon(AppIcons.Mic, null) }, onClick = { menu = false; recording = true })
+                                DropdownMenuItem({ Text("Контакты") }, leadingIcon = { Icon(Icons.Default.Person, null) }, onClick = { menu = false; contacts(obj) })
+                                if (!d?.parsed.isNullOrEmpty()) DropdownMenuItem({ Text("Импорт осмотренного") },
+                                    leadingIcon = { Icon(AppIcons.Checklist, null) }, onClick = { menu = false; loadEarlier() })
+                                DropdownMenuItem({ Text(if (d?.parsed.isNullOrEmpty()) "Загрузить опись" else "Заменить файл описи") },
+                                    leadingIcon = { Icon(AppIcons.UploadFile, null) }, onClick = { menu = false; load() })
+                                // Как прочитан файл описи — и поправить (не тот столбец, не тот лист, шапка не там).
+                                if (!d?.parsed.isNullOrEmpty()) DropdownMenuItem({ Text("Столбцы описи") },
+                                    leadingIcon = { Icon(AppIcons.TableChart, null) }, onClick = { menu = false; columns = false })
+                                if (d?.previous == true) DropdownMenuItem({ Text("Вернуть прежний файл описи") },
+                                    leadingIcon = { Icon(AppIcons.History, null) }, onClick = { menu = false; restore() })
+                            }
+                        }
+                    },
+                )
+            }
         },
         floatingActionButton = {
             if (target == null && selected.size > 1) ExtendedFloatingActionButton(
@@ -435,7 +450,7 @@ fun InventoryScreen(obj: File, into: File? = null, initialQuery: String? = null,
                         // Сколько осмотрено и отбор — уезжают вместе со списком, а не держат треть экрана;
                         // ищут — вместо них одна строка: сколько нашлось.
                         if (v.query.isBlank()) item(key = "head", contentType = "head") {
-                            Column(Modifier.animateContentSize(motion())) {
+                            Column(Modifier.testTag("сводка описи").animateContentSize(motion())) {
                                 // Комментарий, голосовые заметки и контакты описи — в самой шапке: отдельной
                                 // строкой выше неё они появлялись за краем (список держит первую видимую строку).
                                 if (target == null && (note != null || voices.isNotEmpty() || people.isNotEmpty()))
@@ -447,7 +462,12 @@ fun InventoryScreen(obj: File, into: File? = null, initialQuery: String? = null,
                                 // Прочитанное подозрительно (инвентарник у малой доли, наименования — числа…) —
                                 // сказать и дать поправить; скрыли — до смены файла или столбцов.
                                 val warn = d.warnings.takeIf { it.isNotEmpty() && it != v.hiddenWarnings && target == null }
-                                if (warn != null) ReadWarning(warn, onColumns = { columns = false }, onHide = { v.hiddenWarnings = warn })
+                                // Скрыли — плашка сворачивается, а не пропадает за кадр; что было в ней — помним до конца ухода.
+                                val lastWarn = remember { mutableStateOf(emptyList<String>()) }
+                                if (warn != null) lastWarn.value = warn
+                                AnimatedVisibility(warn != null, enter = fadeIn(motion()) + expandVertically(motion()), exit = fadeOut(motion()) + shrinkVertically(motion())) {
+                                    ReadWarning(lastWarn.value, onColumns = { columns = false }, onHide = { v.hiddenWarnings = lastWarn.value })
+                                }
                                 InventoryHead(scope2, st, v, all)
                             }
                         } else item(key = "found", contentType = "found") {
@@ -509,8 +529,11 @@ fun InventoryScreen(obj: File, into: File? = null, initialQuery: String? = null,
                                         if (i.priority.isNotEmpty()) Text("П${i.priority}", softWrap = false, maxLines = 1, modifier = Modifier.clip(RoundedCornerShape(6.dp))
                                             .background(MaterialTheme.colorScheme.secondary.copy(alpha = 0.2f)).padding(horizontal = 6.dp),
                                             style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.secondary)
-                                        if (st?.broken(i) == true) BrokenLabel()
-                                        if (st?.earlier(i) == true) EarlierLabel()
+                                        // Метки — проявляются и уходят, а не возникают за кадр (матрица движения: РЫВОК).
+                                        AnimatedVisibility(st?.broken(i) == true, enter = fadeIn(motion()) + expandHorizontally(motion()),
+                                            exit = fadeOut(motion()) + shrinkHorizontally(motion())) { BrokenLabel() }
+                                        AnimatedVisibility(st?.earlier(i) == true, enter = fadeIn(motion()) + expandHorizontally(motion()),
+                                            exit = fadeOut(motion()) + shrinkHorizontally(motion())) { EarlierLabel() }
                                     }
                                     Text(i.name + (i.qty.toIntOrNull()?.takeIf { it > 1 }?.let { " · $it шт" } ?: ""),
                                         style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)

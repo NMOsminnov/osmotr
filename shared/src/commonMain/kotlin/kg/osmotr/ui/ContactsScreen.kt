@@ -82,7 +82,7 @@ import kotlinx.coroutines.withContext
 fun ContactsScreen(dir: File, close: () -> Unit) {
     val host = LocalHost.current
     val version by Store.version.collectAsStateWithLifecycle()
-    val list by produceState<List<Store.Contact>?>(null, dir, version) { value = withContext(Dispatchers.IO) { Store.contacts(dir) } }
+    val list = rememberLoaded("контакты|${dir.path}", version) { Store.contacts(dir) }
     var editing by remember { mutableStateOf<Pair<Int, Store.Contact>?>(null) }  // индекс −1 — новый
     val links = androidx.compose.ui.platform.LocalUriHandler.current
     // Из телефонной книги: доступ только к выбранному, без разрешения на все контакты.

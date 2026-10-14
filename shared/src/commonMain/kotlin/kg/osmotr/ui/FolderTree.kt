@@ -127,7 +127,7 @@ fun FolderTree(
     selected: SnapshotStateList<File>? = null,
 ) {
     val version by Store.version.collectAsStateWithLifecycle()
-    val tree by produceState<Tree?>(null, version) { value = withContext(Dispatchers.IO) { Tree.build() } }
+    val tree = rememberLoaded("структура", version) { Tree.build() }
     val open = remember { mutableStateListOf<File>() }
     LaunchedEffect(current) {
         generateSequence(current) { if (it == Store.root) null else it.parentFile }.forEach { if (it !in open) open.add(it) }

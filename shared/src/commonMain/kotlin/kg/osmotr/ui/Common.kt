@@ -30,6 +30,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.platform.testTag
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -218,7 +219,7 @@ fun Modifier.panel(shape: androidx.compose.ui.graphics.Shape = androidx.compose.
 /** Комментарий папки или описи — карточкой; касание — править. */
 @Composable
 fun NoteCard(text: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
-    androidx.compose.foundation.layout.Row(modifier.fillMaxWidth().panel().clickable(onClick = onClick).padding(12.dp),
+    androidx.compose.foundation.layout.Row(modifier.fillMaxWidth().testTag("комментарий").panel().clickable(onClick = onClick).padding(12.dp),
         horizontalArrangement = Arrangement.spacedBy(10.dp)) {
         Icon(AppIcons.Notes, null, tint = MaterialTheme.colorScheme.secondary)
         Text(text, style = MaterialTheme.typography.bodyMedium, maxLines = 6, overflow = TextOverflow.Ellipsis)
@@ -237,3 +238,37 @@ fun PeopleCard(people: List<Store.Contact>, onClick: () -> Unit, modifier: Modif
     }
 }
 
+
+/**
+ * Что экран показывал в последний раз — по ключу (опись, папка). Вернулись на экран — то же
+ * сразу, без пустого кадра. Прежде каждый вход начинался с пустого: строки, шапка и плашки
+ * проявлялись заново, а список прыгал, когда следом подгружались комментарий и контакты (автор,
+ * 14.10.2026: «В интерфейсе куча подёргиваний… Каждое обновление экрана вызывает анимацию
+ * появления»). Свежее приходит следом и подменяет тихо: что не поменялось, не двигается.
+ * Только на главном потоке (композиция и её эффекты).
+ */
+object ScreenCache {
+    private val map = LinkedHashMap<String, Any?>()
+    @Suppress("UNCHECKED_CAST")
+    fun <T> get(key: String): T? = map[key] as T?
+    fun put(key: String, value: Any?) {
+        map.remove(key); map[key] = value
+        if (map.size > 300) map.remove(map.keys.first())
+    }
+}
+
+/**
+ * Загрузить в фоне ([load] — на потоке IO) и помнить: первый кадр — прежнее из [ScreenCache]
+ * по [cacheKey], не пустое; [keys] — когда перезагрузить (version, reparse…). То же, что пришло, —
+ * не перерисовывается.
+ */
+@Composable
+fun <T> rememberLoaded(cacheKey: String, vararg keys: Any?, load: suspend () -> T): T? {
+    val state = remember(cacheKey) { mutableStateOf(ScreenCache.get<T>(cacheKey)) }
+    LaunchedEffect(cacheKey, *keys) {
+        val fresh = withContext(Dispatchers.IO) { load() }
+        ScreenCache.put(cacheKey, fresh)
+        if (fresh != state.value) state.value = fresh
+    }
+    return state.value
+}
