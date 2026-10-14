@@ -10,6 +10,8 @@ async fn main() {
     let _ = rustls::crypto::ring::default_provider().install_default();
     // «clean-phone» — снять с подключённого iPhone то, что ставит установщик (проверки на «чистом»).
     if std::env::args().nth(1).as_deref() == Some("clean-phone") { return clean_phone().await }
+    // «trust» — только доверие разработчику на подключённом iPhone, с ответом телефона (без Apple ID).
+    if std::env::args().nth(1).as_deref() == Some("trust") { return trust().await }
     let mut args = std::env::args().skip(1);
     let work = args.next().map(Into::into).unwrap_or_else(|| std::env::temp_dir().join("osmotr-setup"));
     let ipa = args.next().map(Into::into).unwrap_or_else(|| std::path::PathBuf::from("Osmotr.ipa"));
@@ -57,4 +59,24 @@ async fn clean_phone() {
             Err(e) => println!("Не снято: {name} — {}", e.text),
         }
     }
+}
+
+/// Доверие разработчику — отдельно: профили на телефоне и ответ телефона на каждый (журнал — в консоль).
+async fn trust() {
+    use osmotr_setup::{phone, telemetry};
+    let work = std::env::temp_dir().join("osmotr-trust");
+    telemetry::init(&work, "проверка доверия разработчику");
+    let Ok(Some(dev)) = phone::find_usb().await else { println!("iPhone не подключён"); return };
+    if !phone::paired(&dev.udid).await { println!("С телефоном нет знакомства"); return }
+    let Ok(p) = phone::describe(dev).await else { println!("Телефон не отвечает"); return };
+    match phone::profiles(&p).await {
+        Ok(ids) => for id in ids {
+            match phone::trust_signer(&p, &id).await {
+                Ok(b) => println!("профиль: доверие {b}"),
+                Err(f) => println!("профиль: {} — {}", f.text, f.detail),
+            }
+        },
+        Err(f) => println!("профили: {} — {}", f.text, f.detail),
+    }
+    if let Ok(t) = std::fs::read_to_string(work.join("telemetry/log.txt")) { println!("\n— журнал —\n{t}") }
 }

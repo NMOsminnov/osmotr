@@ -209,7 +209,39 @@ pub async fn accept_dev_mode(phone: &Phone) -> R<()> {
 
 /// Доверять разработчику (профиль подписи с [profile_uuid]) — без похода в настройки.
 pub async fn trust_signer(phone: &Phone, profile_uuid: &str) -> R<bool> {
-    amfi(phone).await?.trust_app_signer(profile_uuid.to_string()).await.explain("Телефон не принял доверие разработчику")
+    // Команда AMFI «доверять разработчику» (action 4) — сами, а не trust_app_signer библиотеки: та
+    // выбрасывает ответ телефона, а без него причину отказа не узнать (iOS 26.2, 14.10.2026:
+    // «missing or false success key»). Рамка службы — 4 байта длины (big-endian) и plist.
+    let mut c = amfi(phone).await?;
+    let mut req = plist::Dictionary::new();
+    req.insert("action".into(), 4.into());
+    req.insert("input_profile_uuid".into(), profile_uuid.into());
+    let mut body = Vec::new();
+    plist::Value::Dictionary(req).to_writer_xml(&mut body).explain("Не собрали запрос")?;
+    let mut frame = (body.len() as u32).to_be_bytes().to_vec();
+    frame.extend_from_slice(&body);
+    c.idevice.send_raw(&frame).await.explain("Телефон не принял доверие разработчику")?;
+    let len = u32::from_be_bytes(c.idevice.read_raw(4).await.explain("Телефон не ответил о доверии")?.try_into().unwrap_or([0; 4]));
+    let raw = c.idevice.read_raw(len as usize).await.explain("Телефон не ответил о доверии")?;
+    let res = plist::Value::from_reader(std::io::Cursor::new(&raw)).ok().and_then(|v| v.into_dictionary()).unwrap_or_default();
+    let keys: Vec<&String> = res.keys().collect();
+    let flag = |k: &str| res.get(k).and_then(|v| v.as_boolean());
+    let error = res.get("Error").or_else(|| res.get("error")).map(|v| format!("{v:?}")).unwrap_or_default();
+    crate::telemetry::line(&format!("доверие разработчику: ответ телефона — ключи {keys:?}, success={:?}, status={:?}, ошибка: {error}",
+        flag("success"), flag("status")));
+    match (flag("success"), flag("status")) {
+        (Some(true), Some(s)) => Ok(s),
+        _ => Err(Failure::new("Телефон не принял доверие разработчику", format!("ключи {keys:?}; ошибка: {error}"))),
+    }
+}
+
+/// Чей профиль: имя приложения (AppIDName) — чтобы в журнале было видно, наш ли (SideStore, «Осмотр»,
+/// LocalDevVPN). Имя команды (TeamName) не берётся: у бесплатного Apple ID это имя человека.
+pub fn profile_app(der: &[u8]) -> Option<String> {
+    let start = der.windows(6).position(|w| w == b"<?xml ")?;
+    let end = der.windows(8).rposition(|w| w == b"</plist>")? + 8;
+    let v = plist::Value::from_reader_xml(std::io::Cursor::new(&der[start..end])).ok()?;
+    v.as_dictionary()?.get("AppIDName")?.as_string().map(str::to_string)
 }
 
 /// UUID профилей подписи на телефоне (для [trust_signer]).
@@ -217,6 +249,8 @@ pub async fn profiles(phone: &Phone) -> R<Vec<String>> {
     let provider = phone.provider()?;
     let mut mis = idevice::misagent::MisagentClient::connect(&provider).await.explain("Телефон не дал профили")?;
     let all = mis.copy_all().await.explain("Телефон не дал профили")?;
+    let apps: Vec<String> = all.iter().map(|der| profile_app(der).unwrap_or_else(|| "?".into())).collect();
+    crate::telemetry::line(&format!("доверие разработчику: профилей на телефоне {} — {}", all.len(), apps.join(", ")));
     Ok(all.into_iter().filter_map(|der| profile_uuid(&der)).collect())
 }
 
