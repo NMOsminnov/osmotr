@@ -14,9 +14,13 @@ WW="C:\\Users\\$user\\osmotr-build"
 mkdir -p "$W/bundle"
 rsync -a --delete --exclude target --exclude app/gen "$here/" "$W/installer/"
 cp "$ipa" "$W/bundle/Osmotr.ipa"
-if [ ! -f "$W/bundle/ipatool.exe" ]; then
-  curl -fsSL -o "$W/bundle/ipatool.tar.gz" https://github.com/majd/ipatool/releases/download/v2.6.0/ipatool-2.6.0-windows-amd64.tar.gz
+# ipatool — той версии, что указана (2.6.0 перестал входить в App Store после смены входа у Apple 13.10.2026).
+IPATOOL=2.7.0
+if [ "$(cat "$W/bundle/ipatool.version" 2>/dev/null)" != "$IPATOOL" ]; then
+  rm -rf "$W/bundle/it" "$W/bundle/ipatool.exe"
+  curl -fsSL -o "$W/bundle/ipatool.tar.gz" https://github.com/majd/ipatool/releases/download/v$IPATOOL/ipatool-$IPATOOL-windows-amd64.tar.gz
   mkdir -p "$W/bundle/it" && tar -xzf "$W/bundle/ipatool.tar.gz" -C "$W/bundle/it" && cp "$(find "$W/bundle/it" -name '*.exe' | head -1)" "$W/bundle/ipatool.exe"
+  echo "$IPATOOL" > "$W/bundle/ipatool.version"
 fi
 cd /mnt/c
 powershell.exe -NoProfile -Command "\$env:Path += \";\$env:USERPROFILE\\.cargo\\bin\"; \$env:OSMOTR_IPA='$WW\\bundle\\Osmotr.ipa'; \$env:IPATOOL_EXE='$WW\\bundle\\ipatool.exe'; Set-Location '$WW\\installer'; cargo test -q -p osmotr-setup 2>&1 | Select-String -Pattern 'test result|^error|FAILED' ; cargo build --release -p osmotr-setup-app --features bundled 2>&1 | Select-String -Pattern '^error' -Context 0,8; if (-not (Test-Path target\\release\\osmotr-setup-app.exe)) { exit 1 }"

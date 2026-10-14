@@ -81,7 +81,7 @@ jobs:
           path: bundle
       - name: ipatool для Windows (LocalDevVPN из App Store)
         run: |
-          curl -fsSL -o bundle/ipatool.tar.gz https://github.com/majd/ipatool/releases/download/v2.6.0/ipatool-2.6.0-windows-amd64.tar.gz
+          curl -fsSL -o bundle/ipatool.tar.gz https://github.com/majd/ipatool/releases/download/v2.7.0/ipatool-2.7.0-windows-amd64.tar.gz
           mkdir -p bundle/ipatool && tar -xzf bundle/ipatool.tar.gz -C bundle/ipatool
           exe=$(find bundle/ipatool -name "*.exe" | head -1); cp "$exe" bundle/ipatool.exe; ls -la bundle
       - uses: dtolnay/rust-toolchain@stable

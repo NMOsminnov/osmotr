@@ -168,7 +168,19 @@ pub async fn probe_servers() {
 /// Без адресов почты и номеров телефонов. Числа короче семи цифр (коды ошибок Apple, время,
 /// проценты) остаются; маски Apple вида «(•••) •••-••-56» не трогаются — в них номера уже нет.
 pub fn clean(text: &str) -> String {
-    let text = &tokens(text);
+    // Цвета терминала из вывода программ (ipatool) — прочь: в журнале это мусор «[90m…[0m».
+    let plain: String = {
+        let mut out = String::with_capacity(text.len());
+        let mut it = text.chars().peekable();
+        while let Some(c) = it.next() {
+            if c == '\u{1b}' && it.peek() == Some(&'[') {
+                it.next();
+                while let Some(&n) = it.peek() { it.next(); if n.is_ascii_alphabetic() { break; } }
+            } else { out.push(c); }
+        }
+        out
+    };
+    let text = &tokens(&plain);
     // Почта: слово с «@» и точкой после него.
     let words: Vec<String> = text
         .split_inclusive(|c: char| c.is_whitespace() || "\"',;{}()[]<>".contains(c))
@@ -315,6 +327,12 @@ mod tests {
         assert!(t.contains("библиотека:") && t.contains("SMS 2FA required"), "{t}");
         assert!(!t.to_lowercase().contains("person.name"), "{t}");
         let _ = std::fs::remove_dir_all(&work);
+    }
+
+    #[test]
+    fn цвета_терминала_вычищаются() {
+        let s = clean("\u{1b}[90m11:01am\u{1b}[0m \u{1b}[1m\u{1b}[31merr\u{1b}[0m\u{1b}[0m http 204");
+        assert_eq!(s, "11:01am err http 204");
     }
 
     #[test]
