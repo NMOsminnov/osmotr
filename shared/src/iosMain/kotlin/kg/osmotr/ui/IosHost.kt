@@ -135,6 +135,38 @@ object IosHost : Host {
         }
     }
 
+    // ---------- Фото из галереи — в папку (14.10.2026, как на Android) ----------
+    // Как есть (HEIC, JPEG — без пережатия), время — из EXIF; имя не нужно: расширение — по началу файла.
+
+    private var gotGallery: ((List<Picked>) -> Unit)? = null
+    private val galleryPick = object : NSObject(), PHPickerViewControllerDelegateProtocol {
+        override fun picker(picker: PHPickerViewController, didFinishPicking: List<*>) {
+            val results = didFinishPicking.filterIsInstance<PHPickerResult>()
+            picker.dismissViewControllerAnimated(true, null)
+            val got = gotGallery; gotGallery = null
+            if (got == null || results.isEmpty()) return
+            val out = mutableListOf<Picked>()
+            var left = results.size
+            results.forEach { r ->
+                r.itemProvider.loadDataRepresentationForTypeIdentifier("public.image") { data, _ ->
+                    val bytes = data?.toByteArray()
+                    platform.darwin.dispatch_async(platform.darwin.dispatch_get_main_queue()) {
+                        if (bytes != null) out += Picked("", bytes, kg.osmotr.core.Exif.taken(bytes))
+                        if (--left == 0) got(out)
+                    }
+                }
+            }
+        }
+    }
+
+    override val canPickGallery: Boolean get() = true
+
+    override fun pickGallery(got: (List<Picked>) -> Unit) {
+        gotGallery = got
+        val cfg = PHPickerConfiguration().apply { selectionLimit = 0; filter = PHPickerFilter.imagesFilter }
+        top()?.presentViewController(PHPickerViewController(cfg).apply { delegate = galleryPick }, true, null)
+    }
+
     override fun takePhotos(dir: File) {
         shooting = dir; taken = 0
         if (UIImagePickerController.isSourceTypeAvailable(UIImagePickerControllerSourceType.UIImagePickerControllerSourceTypeCamera)) openCamera()

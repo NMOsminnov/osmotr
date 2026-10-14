@@ -168,6 +168,8 @@ jobs:
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build > xcodebuild-ipa.log 2>&1 \
             || { grep -E "error|e: |What went wrong|FAILED|OutOfMemory|Killed" -A3 xcodebuild-ipa.log | head -80; exit 1; }
           APP=build/dev/Build/Products/Release-iphoneos/Osmotr.app
+          # Расширение «Поделиться» — внутри приложения, иначе «Осмотра» нет в меню «Поделиться».
+          test -d "$APP/PlugIns/OsmotrShare.appex" || { echo "::error::нет расширения «Поделиться» в приложении"; ls -la "$APP" "$APP/PlugIns" || true; exit 1; }
           mkdir -p ipa/Payload && cp -R "$APP" ipa/Payload/
           (cd ipa && zip -qry ../Osmotr.ipa Payload)
           ls -la Osmotr.ipa

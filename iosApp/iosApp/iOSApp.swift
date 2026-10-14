@@ -6,12 +6,33 @@ import Shared
 /// Обёртка для iPhone: весь интерфейс — общий, на Compose (shared/…/ui/OsmotrApp.kt).
 @main
 struct iOSApp: App {
+    @Environment(\.scenePhase) private var phase
+
     var body: some Scene {
         WindowGroup {
             ComposeView()
                 .ignoresSafeArea(.all)
-                // «Открыть в «Осмотр»» / «Поделиться» из WhatsApp, «Файлов», почты: опись — в общий код.
-                .onOpenURL { url in Incoming.shared.receive(url: url) }
+                // «Открыть в «Осмотр»» из «Файлов», почты: опись или фото — в общий код; «osmotr://incoming» —
+                // расширение «Поделиться» положило фото во «Входящие».
+                .onOpenURL { url in
+                    if url.scheme == "osmotr" { SharedInbox.collect() } else { Incoming.shared.receive(url: url) }
+                }
+                // Вернулись в «Осмотр» — забрать присланное расширением, если ссылка не сработала.
+                .onChange(of: phase) { p in if p == .active { SharedInbox.collect() } }
+        }
+    }
+}
+
+/// «Входящие» общей с расширением «Поделиться» папки (App Group «group.<идентификатор>», её
+/// заводит установщик при подписи): каждое фото — в общий код (оттуда — «Куда положить») и прочь.
+enum SharedInbox {
+    static func collect() {
+        guard let id = Bundle.main.bundleIdentifier,
+              let root = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: "group." + id) else { return }
+        let dir = root.appendingPathComponent("Входящие", isDirectory: true)
+        let files = (try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)) ?? []
+        for f in files.sorted(by: { $0.lastPathComponent < $1.lastPathComponent }) {
+            MainViewControllerKt.receiveFile(path: f.path, name: f.lastPathComponent)   // прочтёт и удалит
         }
     }
 }

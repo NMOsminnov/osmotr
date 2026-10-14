@@ -19,7 +19,7 @@ val incoming = mutableStateListOf<Picked>()
 /** Присланный файл (Swift уже скопировал его к себе): в очередь загрузки описей. */
 fun receiveFile(path: String, name: String) {
     val f = File(path)
-    runCatching { incoming.add(Picked(name, f.readBytes())) }
+    runCatching { val bytes = f.readBytes(); incoming.add(Picked(name, bytes, kg.osmotr.core.Exif.taken(bytes))) }
     f.delete()
 }
 
