@@ -140,8 +140,17 @@ fun BrowserScreen(
     // Последнее содержимое папки — сразу, без пустого кадра; свежее подменит его по готовности.
     // Папку переименовывают (сменился состав) — старую не перечитывать: её уже нет, и экран
     // показал бы пустую сетку и «один предмет по имени», а через миг — новый состав.
-    val listing by produceState(Visited.listing[dir], dir, version) {
+    val loaded by produceState(Visited.listing[dir], dir, version) {
         withContext(Dispatchers.IO) { if (dir.isDirectory) Store.list(dir) else null }?.let { value = it; Visited.listing[dir] = it }
+    }
+    // Удалённое — прочь с экрана сразу (Undo.gone), не дожидаясь пересчёта папки; обложка из удалённых — тоже.
+    val gone = Undo.gone.toSet()
+    val listing = remember(loaded, gone) {
+        loaded?.let { l ->
+            if (gone.isEmpty()) l else Store.Listing(
+                l.folders.filter { it.dir.path !in gone }.map { t -> if (t.cover?.path in gone) t.copy(cover = null) else t },
+                l.photos.filter { it.path !in gone })
+        }
     }
     val selected: SnapshotStateList<File> = remember(dir) { emptyList<File>().toMutableStateList() }
     // Убранные из папки — прячутся сразу по касанию (уезжают анимацией), не дожидаясь диска;
@@ -718,7 +727,7 @@ private fun Modifier.dragToSelect(grid: LazyGridState, order: List<File>, select
 @Composable
 private fun PhotoCell(photo: File, selected: Boolean, modifier: Modifier) {
     val host = LocalHost.current
-    Box(modifier.aspectRatio(1f).clip(RoundedCornerShape(6.dp)).background(MaterialTheme.colorScheme.surfaceVariant)) {
+    Box(modifier.testTag("снимок").aspectRatio(1f).clip(RoundedCornerShape(6.dp)).background(MaterialTheme.colorScheme.surfaceVariant)) {
         AsyncImage(
             thumbRequest(photo),
             contentDescription = photo.name, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize(),

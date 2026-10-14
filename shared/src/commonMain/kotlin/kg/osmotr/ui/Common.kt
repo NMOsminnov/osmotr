@@ -49,6 +49,7 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /** Ввод имени папки: клавиатура сразу, «Готово» на клавиатуре — подтверждение. */
@@ -189,7 +190,27 @@ object Undo {
     val last = kotlinx.coroutines.flow.MutableStateFlow<Store.Trashed?>(null)
     /** Не удалилось — сказать прямо, а не молчать. */
     val failed = kotlinx.coroutines.flow.MutableStateFlow(0)
-    fun trash(items: Collection<File>) { Store.trash(items)?.let { last.value = it } ?: run { failed.value++ } }
+    /**
+     * Удаляемое — пути: экраны прячут это сразу по касанию, а корзина работает в фоне (автор,
+     * 14.10.2026: «При удалении фото не сразу обновляются миниатюры» — перенос в корзину с журналом
+     * шёл на главном потоке, а сетка ждала полного пересчёта папки).
+     */
+    val gone = androidx.compose.runtime.mutableStateListOf<String>()
+    private val bg = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Default)
+    fun trash(items: Collection<File>) {
+        val list = items.toList()
+        gone += list.map { it.path }
+        bg.launch {
+            val t = withContext(kotlinx.coroutines.Dispatchers.IO) { Store.trash(list) }
+            if (t != null) last.value = t
+            else { val paths = list.map { it.path }.toSet(); gone.removeAll(paths); failed.value++ }
+        }
+    }
+    /** «Вернуть» — сразу видно снова, файлы возвращаются в фоне. */
+    fun restore(t: Store.Trashed) {
+        gone.removeAll(t.items.map { it.first.path }.toSet())
+        bg.launch { withContext(kotlinx.coroutines.Dispatchers.IO) { Store.restore(t) } }
+    }
 }
 
 /** «12 фото», «1 папка», «5 папок». */

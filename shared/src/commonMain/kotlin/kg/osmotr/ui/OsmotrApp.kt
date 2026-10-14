@@ -149,7 +149,7 @@ private fun Body(host: Host, incoming: SnapshotStateList<Picked>, start: List<Sc
             t.photos.takeIf { it > 0 || t.folders == 0 }?.let { plural(it, "снимок", "снимка", "снимков") },
         ).joinToString(", ")
         val r = snackbar.showSnackbar("Удалено: $what", actionLabel = "Вернуть", duration = SnackbarDuration.Long)
-        if (r == SnackbarResult.ActionPerformed) Store.restore(t)
+        if (r == SnackbarResult.ActionPerformed) Undo.restore(t)
         if (Undo.last.value === t) Undo.last.value = null
     }
     // Папка предмета, которую открыли и покинули пустой (зашли в карточку и вышли, ничего не
