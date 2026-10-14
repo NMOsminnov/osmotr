@@ -104,7 +104,17 @@ pub async fn store_login(tool: &Path, home: &Path, email: &str, password: &str, 
     if let Some(c) = code { args.push("--auth-code"); args.push(c); }
     let out = run(tool, home, &args).await?;
     let text = format!("{}\n{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr)).to_lowercase();
-    if out.status.success() { return Ok(StoreLogin::Ok) }
+    // Что ответил ipatool — целиком в журнал (почта и прочее вычищаются там же).
+    crate::telemetry::line(&format!("App Store: вход — код {:?}, ответ: {}", out.status.code(), text.trim()));
+    if out.status.success() {
+        // Вход «прошёл» — проверить, что ipatool его помнит: прежде скачивание падало с «account not
+        // found in the keyring» сразу после успешного входа (14.10.2026).
+        let info = run(tool, home, &["auth", "info", "--non-interactive", "--keychain-passphrase", "osmotr"]).await?;
+        let said = format!("{}\n{}", String::from_utf8_lossy(&info.stdout), String::from_utf8_lossy(&info.stderr));
+        crate::telemetry::line(&format!("App Store: проверка входа — код {:?}, ответ: {}", info.status.code(), said.trim()));
+        if !info.status.success() { return Err(Failure::new("App Store не запомнил вход", said.trim())) }
+        return Ok(StoreLogin::Ok)
+    }
     if text.contains("2fa") || text.contains("auth code") || text.contains("auth-code") { return Ok(StoreLogin::NeedCode) }
     Err(Failure::new("App Store не пустил войти", text.trim()))
 }
@@ -114,6 +124,8 @@ pub async fn store_download(tool: &Path, home: &Path, app_id: i64, dest: &Path) 
     let id = app_id.to_string();
     let path = dest.to_string_lossy().to_string();
     let out = run(tool, home, &["download", "--non-interactive", "--keychain-passphrase", "osmotr", "--purchase", "-i", &id, "-o", &path]).await?;
+    crate::telemetry::line(&format!("App Store: скачивание — код {:?}, ответ: {} {}", out.status.code(),
+        String::from_utf8_lossy(&out.stdout).trim(), String::from_utf8_lossy(&out.stderr).trim()));
     if out.status.success() && dest.exists() { return Ok(()) }
     Err(Failure::new("Не скачали LocalDevVPN из App Store", String::from_utf8_lossy(&out.stderr).trim()))
 }

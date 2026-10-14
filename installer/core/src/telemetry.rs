@@ -180,6 +180,8 @@ pub fn clean(text: &str) -> String {
         }
         out
     };
+    // Имя пользователя Windows в путях («C:\\Users\\Иван Петров\\…») — у людей это имя и фамилия.
+    let plain = users(&plain);
     let text = &tokens(&plain);
     // Почта: слово с «@» и точкой после него.
     let words: Vec<String> = text
@@ -219,6 +221,23 @@ pub fn clean(text: &str) -> String {
         i += 1;
     }
     clean
+}
+
+/// «…\\Users\\<имя>\\» и «/home/<имя>/» → «<пользователь>».
+fn users(text: &str) -> String {
+    let mut out = text.to_string();
+    for marker in ["\\Users\\", "/Users/", "/home/"] {
+        let mut from = 0;
+        while let Some(i) = out[from..].find(marker) {
+            let start = from + i + marker.len();
+            let end = out[start..].find(['\\', '/']).map(|j| start + j).unwrap_or(out.len());
+            if end > start && end - start < 64 {
+                out.replace_range(start..end, "<пользователь>");
+            }
+            from = start + "<пользователь>".len().min(out.len() - start);
+        }
+    }
+    out
 }
 
 /// Длинные токены (сеансы, ключи, отпечатки — от 24 знаков латиницы, цифр и «+/=_-» подряд) — в заглушку.
@@ -327,6 +346,13 @@ mod tests {
         assert!(t.contains("библиотека:") && t.contains("SMS 2FA required"), "{t}");
         assert!(!t.to_lowercase().contains("person.name"), "{t}");
         let _ = std::fs::remove_dir_all(&work);
+    }
+
+    #[test]
+    fn имя_пользователя_в_путях_вычищается() {
+        let s = clean(r"├ C:\Users\Иван Петров\.cargo\registry\src\x.rs:707 и /home/osmin/x");
+        assert!(!s.contains("Иван") && !s.contains("osmin"), "{s}");
+        assert!(s.contains(r"C:\Users\<пользователь>\.cargo") && s.contains("/home/<пользователь>/x"), "{s}");
     }
 
     #[test]
