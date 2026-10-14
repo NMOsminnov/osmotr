@@ -2367,9 +2367,9 @@ checksum = "791930b43c0d5973160d90a8f3894509f2b273430f5c5c73b668636d0287c5c0"
 
 [[package]]
 name = "isideload"
-version = "0.4.4"
+version = "0.4.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "85ceefdb91380923dae69895ae22c2152129fc2d5b95eb7f9c66c5980ff3761d"
+checksum = "a98e192a82a0203e4cf9928dd5b4cea52b6bcada680ecc78f48834a37e40509d"
 dependencies = [
  "aes 0.9.3",
  "aes-gcm",
@@ -3279,7 +3279,7 @@ checksum = "04744f49eae99ab78e0d5c0b603ab218f515ea8cfe5a456d7629ad883a3b6e7d"
 
 [[package]]
 name = "osmotr-setup"
-version = "0.2.1"
+version = "0.2.3"
 dependencies = [
  "base64 0.22.1",
  "futures",
@@ -3299,7 +3299,7 @@ dependencies = [
 
 [[package]]
 name = "osmotr-setup-app"
-version = "0.2.1"
+version = "0.2.3"
 dependencies = [
  "osmotr-setup",
  "rustls",

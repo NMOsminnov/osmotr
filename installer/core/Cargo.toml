@@ -8,7 +8,7 @@ description = "Шаги установки «Осмотра» на iPhone: др�
 [dependencies]
 # Подпись и установка бесплатным Apple ID — то же, на чём работает iLoader (MIT). Без связки ключей
 # системы: на Linux она тянет dbus; настройки и сертификаты — файлами в папке установщика.
-isideload = { version = "0.4.4", default-features = false, features = ["install", "tokio-mt", "fs-storage"] }
+isideload = { version = "0.4.5", default-features = false, features = ["install", "tokio-mt", "fs-storage"] }
 idevice = { version = "0.1.68", default-features = false, features = ["ring", "usbmuxd", "pair", "house_arrest", "afc", "installation_proxy", "amfi", "misagent", "remote_pairing"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "process", "fs"] }
 reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider", "http2", "stream"] }

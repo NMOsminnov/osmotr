@@ -153,7 +153,7 @@ fn secs(d: Duration) -> String { format!("{:.1} с", d.as_secs_f32()) }
 /// Связь с серверами входа и подписи — перед входом: доступен ли каждый (TCP 443) и за сколько.
 /// «Apple не пустила» чаще всего — сеть или сервер подписи запросов, а не пароль.
 pub async fn probe_servers() {
-    for host in ["gsa.apple.com", "idmsa.apple.com", "developerservices2.apple.com", "ani.sidestore.io"] {
+    for host in ["gsa.apple.com", "idmsa.apple.com", "developerservices2.apple.com", "ani.stikstore.app", "ani.sidestore.io"] {
         let t = Instant::now();
         let r = tokio::time::timeout(Duration::from_secs(6), tokio::net::TcpStream::connect((host, 443))).await;
         let what = match r {
