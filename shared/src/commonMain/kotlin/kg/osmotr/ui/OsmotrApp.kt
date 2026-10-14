@@ -211,8 +211,9 @@ private fun Body(host: Host, incoming: SnapshotStateList<Picked>, start: List<Sc
                             val n = withContext(Dispatchers.IO) {
                                 Store.addPhotos(dir, place.map { Triple(it.name, it.bytes, it.takenMs) }).also { Inventory.refreshReportSoon(dir) }.size
                             }
-                            host.toast("Добавлено в «${dir.name}»: ${plural(n, "фото", "фото", "фото")}")
                             replaceTop(Screen.Browser(dir))
+                            // Куда легло — плашкой с полным путём, надолго (а не короткой подсказкой).
+                            snackbar.showSnackbar("${plural(n, "фото", "фото", "фото")} → ${Store.title(dir)}", duration = SnackbarDuration.Long)
                         }
                     })
             }

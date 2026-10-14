@@ -79,10 +79,14 @@ class PlacePhotosTest {
         compose.onAllNodes(hasSetTextAction()).onFirst().performTextInput("102")
         waitFor { compose.onAllNodes(hasText("Стол письменный", substring = true), true).fetchSemanticsNodes().isNotEmpty() }
         compose.onAllNodes(hasText("Стол письменный", substring = true), true).onFirst().performClick()
+        // Сначала — куда кладём, полным путём; папка предмета ещё не заведена.
+        compose.onAllNodes(hasText("Склад › предмет МТ-102", substring = true)).onFirst().assertExists()
+        assertTrue(Store.foldersIn(obj).isEmpty())
+        compose.onAllNodes(hasText("Положить")).onFirst().performClick()
         val item = Inventory.parse(Inventory.fileIn(obj)!!).items.first { it.inventory == "МТ-102" }
         waitFor { Inventory.status(obj).photosOf(item) == 2 }
         assertEquals(2, Inventory.status(obj).photosOf(item))
-        assertTrue(toasts.toString(), toasts.any { "2 фото" in it })
+        compose.onAllNodes(hasText("2 фото → ", substring = true)).onFirst().assertExists()   // плашка с путём
     }
 
     @Test fun нового_инвентарника_нет_новая_папка_в_описи() {
@@ -90,8 +94,10 @@ class PlacePhotosTest {
         val photos = listOf(Picked("IMG-WA0003.jpg", jpeg))
         compose.setContent { OsmotrApp(host, mutableStateListOf(), listOf(Screen.Search(Store.root, place = photos))) }
         compose.onAllNodes(hasSetTextAction()).onFirst().performTextInput("МТ-999 Сейф")
-        waitFor { compose.onAllNodes(hasText("опись «Склад»", substring = true), true).fetchSemanticsNodes().isNotEmpty() }
-        compose.onAllNodes(hasText("опись «Склад»", substring = true), true).onFirst().performClick()
+        waitFor { compose.onAllNodes(hasText("в описи «Склад»", substring = true), true).fetchSemanticsNodes().isNotEmpty() }
+        compose.onAllNodes(hasText("в описи «Склад»", substring = true), true).onFirst().performClick()
+        compose.onAllNodes(hasText("МТ-999 Сейф (новая папка)", substring = true)).onFirst().assertExists()
+        compose.onAllNodes(hasText("Положить")).onFirst().performClick()
         val dir = File(obj, "МТ-999 Сейф")
         waitFor { Store.photosIn(dir).size == 1 }
         assertEquals(1, Store.photosIn(dir).size)

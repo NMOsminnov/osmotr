@@ -75,6 +75,9 @@ fun SearchScreen(here: File, initial: String = "", open: (File) -> Unit, close: 
     // [place] — сколько присланных фото кладём (автор, 14.10.2026: «При добавлении нужен поиск по папкам,
     // инвентарникам… Ибо это может быть и новый инвентарник»): найденное — куда класть; нет в описи —
     // «Новая папка «…»» в нужной описи; [tree] — выбрать в дереве папок.
+    // Куда кладём — подтвердить, видя весь путь (автор, 14.10.2026: «не совсем понятно, куда фото
+    // улетает»): что показать и как получить папку — заводится только после «Положить».
+    var confirm by remember { mutableStateOf<Pair<String, suspend () -> File?>?>(null) }
     val objects by produceState(emptyList<File>(), place) {
         if (place != null) value = withContext(Dispatchers.IO) { Store.foldersIn(Store.root).filter { Inventory.fileIn(it) != null } }
     }
@@ -130,11 +133,16 @@ fun SearchScreen(here: File, initial: String = "", open: (File) -> Unit, close: 
                 items(itemHits, key = { "i:" + it.obj.path + it.item.list + it.item.row }) { e ->
                     ItemResult(e, query) {
                         keyboard?.hide()
-                        scope.launch { open(withContext(Dispatchers.IO) { Inventory.openFolder(e.obj, e.item) }) }
+                        if (place != null) confirm = ("${Store.title(e.obj)} › предмет ${e.item.inventory.ifEmpty { "№ " + e.item.number }} — ${e.item.name}") to
+                            suspend { withContext(Dispatchers.IO) { Inventory.openFolder(e.obj, e.item) } }
+                        else scope.launch { open(withContext(Dispatchers.IO) { Inventory.openFolder(e.obj, e.item) }) }
                     }
                 }
                 if (itemHits.isNotEmpty() && hits.isNotEmpty()) item(key = "folders-h") { Section("Папки") }
-                items(hits, key = { it.entry.dir.path }) { hit -> Result(hit, query) { keyboard?.hide(); open(hit.entry.dir) } }
+                items(hits, key = { it.entry.dir.path }) { hit -> Result(hit, query) {
+                    keyboard?.hide()
+                    if (place != null) confirm = Store.title(hit.entry.dir) to suspend { hit.entry.dir } else open(hit.entry.dir)
+                } }
                 // Нового инвентарника нет ни в описи, ни в папках — завести папку с этим названием там, где он стоит.
                 val name = query.trim()
                 if (place != null && name.isNotEmpty()) {
@@ -142,18 +150,30 @@ fun SearchScreen(here: File, initial: String = "", open: (File) -> Unit, close: 
                     items(objects + Store.root, key = { "n:" + it.path }) { parent ->
                         Row(Modifier.fillMaxWidth().clickable {
                             keyboard?.hide()
-                            scope.launch {
-                                val dir = withContext(Dispatchers.IO) { Store.createFolder(parent, name) ?: File(parent, Store.cleanName(name)).takeIf { it.isDirectory } }
-                                dir?.let(open)
+                            confirm = "${if (parent == Store.root) "Осмотры" else Store.title(parent)} › $name (новая папка)" to suspend {
+                                withContext(Dispatchers.IO) { Store.createFolder(parent, name) ?: File(parent, Store.cleanName(name)).takeIf { it.isDirectory } }
                             }
                         }.padding(horizontal = 16.dp, vertical = 12.dp).testTag("новая папка"), verticalAlignment = Alignment.CenterVertically) {
                             Icon(AppIcons.CreateNewFolder, null, tint = MaterialTheme.colorScheme.primary)
-                            Text("  в " + if (parent == Store.root) "«Осмотры» (без описи)" else "опись «${parent.name}»", style = MaterialTheme.typography.bodyLarge)
+                            Text("  Новая папка «$name» " + if (parent == Store.root) "в «Осмотрах» (без описи)" else "в описи «${parent.name}»",
+                                style = MaterialTheme.typography.bodyLarge)
                         }
                     }
                 }
             }
         }
+    }
+    confirm?.let { (where, resolve) ->
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { confirm = null },
+            title = { Text("Положить ${plural(place ?: 0, "фото", "фото", "фото")} сюда?") },
+            text = { Text(where, style = MaterialTheme.typography.bodyLarge) },
+            confirmButton = { TextButton(onClick = {
+                confirm = null
+                scope.launch { resolve()?.let(open) }
+            }, modifier = Modifier.testTag("положить")) { Text("Положить") } },
+            dismissButton = { TextButton(onClick = { confirm = null }) { Text("Назад") } },
+        )
     }
 }
 
