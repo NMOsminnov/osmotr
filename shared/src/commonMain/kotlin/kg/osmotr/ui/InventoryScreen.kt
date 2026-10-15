@@ -537,7 +537,12 @@ fun InventoryScreen(obj: File, into: File? = null, initialQuery: String? = null,
                                                 exit = fadeOut(motion()) + shrinkHorizontally(motion())) { BrokenLabel() }
                                             AnimatedVisibility(st?.repair(i) == true, enter = fadeIn(motion()) + expandHorizontally(motion()),
                                                 exit = fadeOut(motion()) + shrinkHorizontally(motion())) { RepairLabel() }
-                                            AnimatedVisibility(st?.earlier(i) == true, enter = fadeIn(motion()) + expandHorizontally(motion()),
+                                            // «Осмотрено» — у любого осмотренного: и отмеченного вручную, и снятого (отзыв
+                                            // 15.10.2026: «когда просто отмечаешь — надпись есть, а когда добавляешь фотки — нет.
+                                            // По логике везде должно быть»). У «нерабочего» и «ремонта» — их метка: отметить
+                                            // их можно только снятое, осмотренность в них уже есть.
+                                            AnimatedVisibility(st?.inspected(i) == true && st.broken(i) != true && st.repair(i) != true,
+                                                enter = fadeIn(motion()) + expandHorizontally(motion()),
                                                 exit = fadeOut(motion()) + shrinkHorizontally(motion())) { EarlierLabel() }
                                         }
                                         Text(i.name + (i.qty.toIntOrNull()?.takeIf { it > 1 }?.let { " · $it шт" } ?: ""),

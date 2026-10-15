@@ -136,4 +136,16 @@ class TreeNavTest {
         assertEquals(File(obj, "Сейф 7").path, made.path)
         assertTrue(made.isDirectory)
     }
+
+    /** «Осмотрено» — и у снятого, не только у отмеченного вручную (отзыв 15.10.2026). */
+    @Test fun метка_осмотрено_у_снятого() {
+        val obj = setUp()
+        val items = Inventory.parse(Inventory.fileIn(obj)!!).items
+        File(Inventory.openFolder(obj, items[0]), "a.jpg").writeBytes(jpeg)
+        Store.changed()
+        content(listOf(Screen.Inventory(obj)))
+        waitFor { has("МТ-101") }
+        waitFor { compose.onAllNodes(hasTestTag("метка осмотрено"), true).fetchSemanticsNodes().isNotEmpty() }
+        assertEquals("одна метка — у снятого шкафа", 1, compose.onAllNodes(hasTestTag("метка осмотрено"), true).fetchSemanticsNodes().size)
+    }
 }
