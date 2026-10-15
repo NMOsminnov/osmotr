@@ -31,7 +31,15 @@ import tempfile
 import time
 import xml.etree.ElementTree as ET
 
-ADB = os.path.expanduser('~/Android/Sdk/platform-tools/adb')
+# Эмулятор в Windows (WSL без KVM, 15.10.2026): OSMOTR_ADB=путь к adb.exe — пути к файлам тогда
+# переводятся в Windows-вид (wslpath -w).
+ADB = os.environ.get('OSMOTR_ADB') or os.path.expanduser('~/Android/Sdk/platform-tools/adb')
+WIN_ADB = ADB.lower().endswith('.exe')
+
+
+def local(path):
+    """Путь к файлу на этой машине — в том виде, который поймёт adb (Windows-adb — Windows-путь)."""
+    return subprocess.run(['wslpath', '-w', path], capture_output=True, text=True).stdout.strip() if WIN_ADB else path
 PKG = 'kg.osmotr'
 ROOT = '/sdcard/Осмотры'
 SIZES = {'телефон': None, 'малый': ('720x1280', 280), 'планшет': ('1600x2560', 320)}
@@ -161,9 +169,15 @@ class Device:
         return sorted(rects)
 
     def focus(self):
-        out = sh('dumpsys', 'window')
-        m = re.search(r'mCurrentFocus=Window\{\S+ \S+ ([^}\s]+)', out)
-        return m.group(1) if m else ''
+        # Пусто — окно в переходе (открывается системный выбор файлов, фокуса ещё ни у кого нет):
+        # переспросить, а не считать вылетом.
+        for _ in range(6):
+            out = sh('dumpsys', 'window')
+            m = re.search(r'mCurrentFocus=Window\{\S+ \S+ ([^}\s]+)', out)
+            if m:
+                return m.group(1)
+            time.sleep(0.5)
+        return ''
 
     def mark_crashes(self):
         sh('logcat', '-b', 'crash', '-c')
@@ -513,6 +527,8 @@ def p_bad_files(r):
 def p_replace_wrong(r):
     # Опись стенда со снимками в папках: замене есть что терять (пустую папку приложение убирает само).
     open_inventory(r, 'Корпус A')
+    # Сколько осмотрено — до замены: после «Отмена» должно остаться так же (стенд может быть любым).
+    before = next((n.text for n in r.scr.nodes if re.search(r'из \d+ осмотрено', n.text or '')), None)
     r.tap('Ещё', 'меню', exact=True)
     r.tap('Заменить файл описи', 'выбор файла')
     # Системный выбор файлов: к папке Download/matrix.
@@ -527,7 +543,7 @@ def p_replace_wrong(r):
     time.sleep(3); r.look('проверка замены')
     r.expect('спросили перед заменой', has=['Заменить файл описи?', 'Похоже, это другая опись.'])
     r.tap('Отмена')
-    r.expect('опись как была', has=['из 5709 осмотрено'])
+    r.expect('опись как была', has=[before] if before else ['осмотрено'])
 
 
 def p_screens(r):
@@ -579,7 +595,7 @@ def fixtures():
     open(os.path.join(d, 'matrix-pdf.xlsx'), 'wb').write(b'%PDF-1.4\n%\xe2\xe3\xcf\xd3\n1 0 obj\n<<>>\nendobj\n')
     sh('rm', '-rf', FIXTURES); sh('mkdir', '-p', FIXTURES)
     for f in os.listdir(d):
-        adb('push', os.path.join(d, f), f'{FIXTURES}/{f}', check=True)
+        adb('push', local(os.path.join(d, f)), f'{FIXTURES}/{f}', check=True)
     # Видно системному выбору файлов.
     for f in os.listdir(d):
         sh('am', 'broadcast', '-a', 'android.intent.action.MEDIA_SCANNER_SCAN_FILE', '-d', f'file://{FIXTURES}/{f}')

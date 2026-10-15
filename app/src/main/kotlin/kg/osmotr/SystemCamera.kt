@@ -137,14 +137,30 @@ object SystemCamera {
             val to = File(target.path)
             if (f.renameTo(to) || copyWhole(f, to)) {
                 moved += target; sources += KFile(f.absolutePath)
-                // Запись галереи о прежнем месте — прочь сразу. Повторный разбор пути, которого
-                // больше нет, успевал не всегда, и в галерее оставались чёрные квадраты «файл
-                // повреждён» (отзыв 15.10.2026). Нет прав — подберёт разбор, как раньше.
-                runCatching { context.contentResolver.delete(android.content.ContentUris.withAppendedId(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, id), null, null) }
+                // Запись галереи о прежнем месте — прочь, но ТОЛЬКО если она всё ещё указывает на
+                // старый путь, которого больше нет (чёрные квадраты «файл повреждён», отзыв
+                // 15.10.2026). На Android 11+ перенос через систему сам переводит запись на новый
+                // путь — и удаление записи удаляет файл уже в папке предмета: снимок пропадал
+                // целиком (поймано на эмуляторе 15.10.2026, 3.8 до исправления).
+                dropStaleRow(context, id, f)
             }
         }
         Store.saved(moved, removed = sources)
         return moved.size
+    }
+
+    /**
+     * Удалить запись галереи [id], если она указывает на [old] и файла там больше нет. Запись,
+     * которую система уже перевела на новое место (Android 11+), не трогается: её удаление
+     * удалило бы сам снимок.
+     */
+    internal fun dropStaleRow(context: Context, id: Long, old: File): Boolean {
+        val uri = android.content.ContentUris.withAppendedId(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, id)
+        val path = runCatching {
+            context.contentResolver.query(uri, arrayOf(MediaStore.Images.Media.DATA), null, null, null)?.use { c -> if (c.moveToFirst()) c.getString(0) else null }
+        }.getOrNull() ?: return false
+        if (path != old.absolutePath || File(path).exists()) return false
+        return runCatching { context.contentResolver.delete(uri, null, null) > 0 }.getOrDefault(false)
     }
 
     /**
