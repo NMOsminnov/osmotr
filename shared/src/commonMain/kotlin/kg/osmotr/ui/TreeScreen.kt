@@ -99,7 +99,7 @@ fun TreeScreen(current: File, open: (File) -> Unit, close: () -> Unit, place: Li
             androidx.compose.material3.AlertDialog(
                 onDismissRequest = { confirm = null },
                 title = { Text("Положить ${plural(place!!.size, "фото", "фото", "фото")} сюда?") },
-                text = { Text(where, style = androidx.compose.material3.MaterialTheme.typography.bodyLarge) },
+                text = { DialogBody { Text(where, style = androidx.compose.material3.MaterialTheme.typography.bodyLarge) } },
                 confirmButton = { androidx.compose.material3.TextButton(onClick = {
                     confirm = null
                     if (placing) return@TextButton

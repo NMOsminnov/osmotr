@@ -450,7 +450,7 @@ fun BrowserScreen(
     if (diagnostics) DiagnosticsDialog(onClose = { diagnostics = false })
     zipError?.let { e ->
         AlertDialog(onDismissRequest = { zipError = null }, title = { Text("Архив не отправлен") },
-            text = { Text("Сборка не удалась: $e. Проверьте свободную память телефона.") },
+            text = { DialogBody { Text("Сборка не удалась: $e. Проверьте свободную память телефона.") } },
             confirmButton = { TextButton(onClick = { zipError = null }) { Text("Понятно") } })
     }
     if (newFolder) NameDialog("Новая папка в «${Store.title(dir)}»", onDone = { name ->
@@ -466,7 +466,7 @@ fun BrowserScreen(
         AlertDialog(
             onDismissRequest = { deleteFolder = false },
             title = { Text("Удалить «${dir.name}»?") },
-            text = { Text("Вместе со всем содержимым: ${plural(count, "снимок", "снимка", "снимков")}.") },
+            text = { DialogBody { Text("Вместе со всем содержимым: ${plural(count, "снимок", "снимка", "снимков")}.") } },
             confirmButton = { TextButton(onClick = {
                 deleteFolder = false
                 val parent = dir.parentFile ?: Store.root

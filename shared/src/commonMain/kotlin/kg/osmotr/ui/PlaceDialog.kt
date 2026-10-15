@@ -61,7 +61,7 @@ fun PlaceInFolderDialog(dir: File, count: Int, place: (where: String, resolve: s
     AlertDialog(
         onDismissRequest = dismiss,
         title = { Text("${plural(count, "фото", "фото", "фото")} — куда?") },
-        text = {
+        text = { DialogBody {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (dir != Store.root) Row(Modifier.fillMaxWidth().clickable { place(here) { dir } }.padding(vertical = 10.dp).testTag("положить сюда"),
                     verticalAlignment = Alignment.CenterVertically) {
@@ -85,7 +85,7 @@ fun PlaceInFolderDialog(dir: File, count: Int, place: (where: String, resolve: s
                     Text("  Новая папка «$q» в «$here»", maxLines = 2, overflow = TextOverflow.Ellipsis)
                 }
             }
-        },
+        } },
         confirmButton = {},
         dismissButton = { TextButton(onClick = dismiss) { Text("Назад") } },
     )

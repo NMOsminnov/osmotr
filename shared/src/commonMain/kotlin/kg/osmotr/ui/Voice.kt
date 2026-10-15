@@ -85,7 +85,7 @@ fun VoiceRecorderDialog(dir: File, onClose: () -> Unit) {
     AlertDialog(
         onDismissRequest = { stop(); onClose() },
         title = { Text("Диктофон") },
-        text = {
+        text = { DialogBody {
             Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 Text(if (recording) clock(now - started) else "Нажмите и говорите", style = MaterialTheme.typography.headlineSmall,
                     fontWeight = FontWeight.SemiBold)
@@ -100,7 +100,7 @@ fun VoiceRecorderDialog(dir: File, onClose: () -> Unit) {
                 else Text(if (recording) "Нажмите ещё раз — запись ляжет в папку." else "Запись ляжет в эту папку рядом со снимками.",
                     color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
             }
-        },
+        } },
         confirmButton = { TextButton(onClick = { stop(); onClose() }) { Text(if (recording) "Готово" else "Закрыть") } },
     )
 }

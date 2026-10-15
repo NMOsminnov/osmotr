@@ -265,7 +265,7 @@ fun ColumnsScreen(obj: File, ask: Boolean = false, onClose: () -> Unit, onSaved:
             AlertDialog(
                 onDismissRequest = { rowAsk = null },
                 title = { Text("Строка ${row + 1}") },
-                text = {
+                text = { DialogBody {
                     Column {
                         sr?.sheet?.rows?.getOrNull(row)?.filter(String::isNotBlank)?.take(4)?.takeIf { it.isNotEmpty() }?.let {
                             Text(it.joinToString(" · ") { s -> s.take(20) }, Modifier.padding(bottom = 8.dp), style = MaterialTheme.typography.bodySmall,
@@ -278,7 +278,7 @@ fun ColumnsScreen(obj: File, ask: Boolean = false, onClose: () -> Unit, onSaved:
                         TextButton(onClick = { set(cur.copy(skip = false, header = -1, body = row)) }) { Text("Шапки нет, предметы — с этой строки") }
                         if (cur.header != null || cur.body != null) TextButton(onClick = { set(cur.copy(header = null, body = null)) }) { Text("Как решит приложение") }
                     }
-                },
+                } },
                 confirmButton = { TextButton(onClick = { rowAsk = null }) { Text("Закрыть") } },
             )
         }
@@ -286,7 +286,7 @@ fun ColumnsScreen(obj: File, ask: Boolean = false, onClose: () -> Unit, onSaved:
         if (leaving) AlertDialog(
             onDismissRequest = { leaving = false },
             title = { Text("Не сохранять изменения?") },
-            text = { Text("Указанное на этом экране пропадёт, опись останется прочитанной как раньше.") },
+            text = { DialogBody { Text("Указанное на этом экране пропадёт, опись останется прочитанной как раньше.") } },
             confirmButton = { TextButton(onClick = { leaving = false; onClose() }) { Text("Не сохранять") } },
             dismissButton = { TextButton(onClick = { leaving = false }) { Text("Остаться") } },
         )

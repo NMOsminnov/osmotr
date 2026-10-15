@@ -167,7 +167,7 @@ fun SearchScreen(here: File, initial: String = "", open: (File) -> Unit, close: 
         androidx.compose.material3.AlertDialog(
             onDismissRequest = { confirm = null },
             title = { Text("Положить ${plural(place ?: 0, "фото", "фото", "фото")} сюда?") },
-            text = { Text(where, style = MaterialTheme.typography.bodyLarge) },
+            text = { DialogBody { Text(where, style = MaterialTheme.typography.bodyLarge) } },
             confirmButton = { TextButton(onClick = {
                 confirm = null
                 scope.launch { resolve()?.let(open) }

@@ -1,5 +1,6 @@
 package kg.osmotr.ui
 
+import androidx.compose.foundation.verticalScroll
 import kg.osmotr.core.File
 import kg.osmotr.core.Inventory
 import kg.osmotr.core.Platform
@@ -62,14 +63,14 @@ fun NameDialog(title: String, initial: String = "", confirm: String = "Созд�
     AlertDialog(
         onDismissRequest = onCancel,
         title = { Text(title) },
-        text = {
+        text = { DialogBody {
             OutlinedTextField(
                 value, { value = it }, Modifier.fillMaxWidth().focusRequester(focus), singleLine = true,
                 keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences, imeAction = ImeAction.Done),
                 keyboardActions = KeyboardActions(onDone = { if (ok) onDone(value.text) }),
                 placeholder = { Text("Например, Насос 1") },
             )
-        },
+        } },
         confirmButton = { TextButton(onClick = { onDone(value.text) }, enabled = ok) { Text(confirm) } },
         dismissButton = { TextButton(onClick = onCancel) { Text("Отмена") } },
     )
@@ -84,11 +85,11 @@ fun NoteDialog(initial: String, onDone: (String) -> Unit, onCancel: () -> Unit) 
     AlertDialog(
         onDismissRequest = onCancel,
         title = { Text("Комментарий") },
-        text = {
+        text = { DialogBody {
             OutlinedTextField(value, { value = it }, Modifier.fillMaxWidth().heightIn(min = 120.dp).focusRequester(focus),
                 keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
                 placeholder = { Text("Например: течь по сальнику, шильдик не читается") })
-        },
+        } },
         confirmButton = { TextButton(onClick = { onDone(value) }) { Text("Готово") } },
         dismissButton = { TextButton(onClick = onCancel) { Text("Отмена") } },
     )
@@ -106,7 +107,7 @@ fun FolderPicker(title: String, start: File, action: String, onPick: (File) -> U
     AlertDialog(
         onDismissRequest = onCancel,
         title = { Text(title) },
-        text = {
+        text = { DialogBody {
             Column {
                 FolderTree(current = start, highlight = target, onPick = { target = it }, disabled = blocked,
                     modifier = Modifier.fillMaxWidth().heightIn(max = 420.dp))
@@ -116,7 +117,7 @@ fun FolderPicker(title: String, start: File, action: String, onPick: (File) -> U
                     Text("Новая папка", color = MaterialTheme.colorScheme.primary, maxLines = 1)
                 }
             }
-        },
+        } },
         confirmButton = { TextButton(onClick = { onPick(target) }, enabled = !blocked(target)) { Text(action) } },
         dismissButton = { TextButton(onClick = onCancel) { Text("Отмена") } },
     )
@@ -293,3 +294,13 @@ fun <T> rememberLoaded(cacheKey: String, vararg keys: Any?, load: suspend () -> 
     }
     return state.value
 }
+
+/**
+ * Тело окна — с прокруткой. Без неё на небольшом экране, при крупном шрифте или лёжа длинное
+ * содержимое (потерянные строки при замене описи, путь, варианты выгрузки) обрезалось без
+ * возможности дочитать (15.10.2026, «возможность прокрутки»).
+ */
+@androidx.compose.runtime.Composable
+fun DialogBody(content: @androidx.compose.runtime.Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit) =
+    androidx.compose.foundation.layout.Column(
+        androidx.compose.ui.Modifier.verticalScroll(androidx.compose.foundation.rememberScrollState()), content = content)

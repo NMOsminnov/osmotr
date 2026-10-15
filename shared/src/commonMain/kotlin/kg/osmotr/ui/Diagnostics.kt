@@ -46,13 +46,13 @@ fun DiagnosticsDialog(onClose: () -> Unit) {
     AlertDialog(
         onDismissRequest = { if (!busy) onClose() },
         title = { Text("Диагностика") },
-        text = {
+        text = { DialogBody {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("Архив для разбора ошибок: журнал работы приложения, отчёты о сбоях, версия и модель телефона.")
                 Text("Ваших описей, снимков, комментариев, контактов и названий папок в нём нет.",
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-        },
+        } },
         confirmButton = {
             TextButton(enabled = !busy, onClick = {
                 busy = true

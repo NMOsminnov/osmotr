@@ -200,7 +200,7 @@ private fun ContactEditor(initial: Store.Contact, isNew: Boolean, onDone: (Store
     if (confirmDelete) AlertDialog(
         onDismissRequest = { confirmDelete = false },
         title = { Text("Удалить контакт?") },
-        text = { Text(c.name.ifBlank { c.phone }) },
+        text = { DialogBody { Text(c.name.ifBlank { c.phone }) } },
         confirmButton = { TextButton(onClick = { confirmDelete = false; onDelete() }) { Text("Удалить", color = MaterialTheme.colorScheme.error) } },
         dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("Отмена") } },
     )
