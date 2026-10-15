@@ -304,3 +304,16 @@ fun <T> rememberLoaded(cacheKey: String, vararg keys: Any?, load: suspend () -> 
 fun DialogBody(content: @androidx.compose.runtime.Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit) =
     androidx.compose.foundation.layout.Column(
         androidx.compose.ui.Modifier.verticalScroll(androidx.compose.foundation.rememberScrollState()), content = content)
+
+
+/**
+ * Положить присланное в [dir]: из временных файлов — потоком (Android), из памяти — как есть.
+ * Сколько легло — в ответе.
+ */
+fun placePhotos(dir: kg.osmotr.core.File, place: List<Picked>): Int {
+    val (files, mem) = place.partition { it.file != null }
+    val a = if (files.isEmpty()) emptyList() else kg.osmotr.core.Store.addPhotoFiles(dir, files.map { Triple(it.name, it.file!!, it.takenMs) })
+    val b = if (mem.isEmpty()) emptyList() else kg.osmotr.core.Store.addPhotos(dir, mem.map { Triple(it.name, it.bytes, it.takenMs) })
+    kg.osmotr.core.Inventory.refreshReportSoon(dir)
+    return a.size + b.size
+}

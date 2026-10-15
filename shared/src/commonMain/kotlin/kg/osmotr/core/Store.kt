@@ -28,7 +28,16 @@ object Store {
     /** Растёт на каждую правку — экраны перечитывают свои папки. */
     private val _version = MutableStateFlow(0)
     val version: StateFlow<Int> = _version.asStateFlow()
-    fun changed() { _version.value++ }
+    fun changed(structure: Boolean = true) { if (structure) this.structure++; _version.value++ }
+
+    /**
+     * Растёт на каждую правку, которая могла поменять папки (создать, перенести, переименовать,
+     * удалить, сменить состав предмета) — по умолчанию любую. Не растёт только на запись снимков:
+     * по нему Inventory держит «предмет → папка» между нажатиями (Inventory.openFolder), и быстрая
+     * съёмка подряд не обходит заново все папки описи.
+     */
+    @kotlin.concurrent.Volatile var structure = 0L
+        private set
 
     /** Миниатюры и регистрация файлов — в фоне, одним потоком: съёмка не ждёт. */
     @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
@@ -337,7 +346,7 @@ object Store {
             // В журнал описи — каждый снимок с отпечатком содержимого (в фоне: отпечаток — чтение файла).
             photos.forEach { p -> p.parentFile?.let { Journal.add(it, "Снимок", relative(p), p) } }
         }
-        changed()
+        changed(structure = false)
     }
     fun saved(photo: File) = saved(listOf(photo))
 
@@ -354,9 +363,33 @@ object Store {
             f
         }
         saved(out)
-        changed()
+        changed(structure = false)
         return out
     }
+
+    /**
+     * Снимки из файлов — присланное, которое приложение уже переписало во временные файлы
+     * (Android: «Поделиться», галерея). Потоком, без содержимого в памяти: сотня снимков по 4 МБ
+     * целиком в памяти роняла бы приложение (предел — 256–512 МБ). Временные — удаляются.
+     */
+    fun addPhotoFiles(dir: File, items: List<Triple<String, File, Long?>>): List<File> {
+        val out = items.mapNotNull { (name, src, taken) ->
+            if (!src.isFile) return@mapNotNull null
+            val ext = name.substringAfterLast('.', "").lowercase().let { if (it == "jpeg") "jpg" else it }.takeIf { it in PHOTO_EXT } ?: sniff(head(src))
+            val f = newPhotoFile(dir, ext, taken ?: Platform.nowMs())
+            writeDurably(f) { sink -> systemFs.source(src.path.toPath()).use { sink.writeAll(it) } }
+            src.delete()
+            f
+        }
+        saved(out)
+        changed(structure = false)
+        return out
+    }
+
+    /** Начало файла — для определения вида по содержимому. */
+    fun head(f: File, n: Int = 16): ByteArray = runCatching {
+        systemFs.source(f.path.toPath()).buffer().use { s -> s.request(n.toLong()); s.readByteArray(minOf(n.toLong(), s.buffer.size)) }
+    }.getOrDefault(ByteArray(0))
 
     /** Расширение по началу файла: имя не сказало (мессенджеры шлют без него). */
     private fun sniff(b: ByteArray): String = when {

@@ -229,15 +229,30 @@ object Journal {
      */
     fun verifyQuick(obj: File): Check {
         val list = entries(obj)
-        val known = synchronized(lock) { checked[obj.path] }
+        // Докуда подписи уже проверены — в памяти сеанса, а после перезапуска — в служебной папке
+        // приложения: иначе первый отчёт после каждого запуска проверял подписи всего журнала
+        // (десятки тысяч записей к концу выезда — десятки секунд на телефоне; нагрузочный профиль
+        // 15.10.2026: две трети времени отчёта). Цепочка отпечатков пересчитывается вся — дёшево,
+        // и правка любой прежней записи ловится, как прежде; пропускается только проверка подписи
+        // там, где цепочка совпала с уже проверенной.
+        val known = synchronized(lock) { checked[obj.path] } ?: storedChecked()[Store.relative(obj)]
         val from = if (known != null && known.first in 1..list.size && list[known.first - 1].hash == known.second) known.first else 0
-        return verifyFrom(obj, list, from, fresh = false)
+        return verifyFrom(obj, list, chainFrom = 0, fresh = false, sigFrom = from)
     }
 
-    private fun verifyFrom(obj: File, list: List<Entry>, chainFrom: Int, fresh: Boolean): Check {
+    private fun checkedFile() = File(appDir(), "journal-checked.txt")
+    private fun storedChecked(): Map<String, Pair<Int, String>> = runCatching {
+        checkedFile().readLines().mapNotNull { l -> l.split('\t').takeIf { it.size == 3 }?.let { it[0] to (it[1].toInt() to it[2]) } }.toMap()
+    }.getOrDefault(emptyMap())
+    private fun saveChecked(obj: File, n: Int, hash: String) = runCatching {
+        val all = storedChecked() + (Store.relative(obj) to (n to hash))
+        Store.writeDurably(checkedFile(), all.entries.joinToString("\n") { "${it.key}\t${it.value.first}\t${it.value.second}" }.encodeToByteArray())
+    }
+
+    private fun verifyFrom(obj: File, list: List<Entry>, chainFrom: Int, fresh: Boolean, sigFrom: Int = chainFrom): Check {
         val head = storedHeads()[Store.relative(obj)]
         if (list.isEmpty()) return Check(0, if (head != null) 1 else null, "журнал удалён (было ${head?.first} записей)", 0)
-        val c = check(list, chainFrom)
+        val c = check(list, chainFrom, sigFrom)
         if (c.brokenAt != null) return c
         if (head != null && (list.size < head.first || list[head.first - 1].hash != head.second))
             return c.copy(brokenAt = minOf(list.size, head.first), reason = "журнал короче, чем был, или заменён (было ${head.first} записей)")
@@ -253,12 +268,13 @@ object Journal {
         }
         for (path in want.keys) if (path !in have) problems += Problem(path, "пропал без записи")
         saveHashes()
-        synchronized(lock) { checked[obj.path] = list.size to list.last().hash }
+        val was = synchronized(lock) { checked.put(obj.path, list.size to list.last().hash) }
+        if (was?.first != list.size) saveChecked(obj, list.size, list.last().hash)
         return c.copy(problems = problems, devices = list.map { it.key }.distinct().size)
     }
 
     /** Цепочка и подписи (с [from] — только новые строки); время назад — предупреждение. */
-    fun check(list: List<Entry>, from: Int = 0): Check {
+    fun check(list: List<Entry>, from: Int = 0, sigFrom: Int = from): Check {
         var prev = if (from > 0) list[from - 1].hash else ""
         var prevT = if (from > 0) list[from - 1].t else 0L
         val warnings = mutableListOf<String>()
@@ -268,7 +284,7 @@ object Journal {
             if (e.n != at) return Check(list.size, at, if (e.n < 0) "строка не читается" else "номер ${e.n} вместо $at — строку удалили или вставили", 0)
             if (e.prev != prev) return Check(list.size, at, "не сходится с предыдущей записью", 0)
             if (hex(Platform.sha256(e.body().encodeToByteArray())) != e.hash) return Check(list.size, at, "содержимое изменено", 0)
-            if (!Platform.verify(unhex(e.key), e.hash.encodeToByteArray(), unhex(e.sig))) return Check(list.size, at, "подпись не сходится", 0)
+            if (i >= sigFrom && !Platform.verify(unhex(e.key), e.hash.encodeToByteArray(), unhex(e.sig))) return Check(list.size, at, "подпись не сходится", 0)
             if (e.t < prevT - 10 * 60_000) warnings += "время записи № $at раньше предыдущей — переводили часы?"
             prev = e.hash; prevT = e.t
         }

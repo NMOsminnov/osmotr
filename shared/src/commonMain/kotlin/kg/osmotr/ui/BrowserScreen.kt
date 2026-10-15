@@ -328,7 +328,7 @@ fun BrowserScreen(
                                 if (got.isEmpty()) return@pickGallery
                                 scope.launch {
                                     val n = withContext(Dispatchers.IO) {
-                                        Store.addPhotos(dir, got.map { Triple(it.name, it.bytes, it.takenMs) }).also { Inventory.refreshReportSoon(dir) }.size
+                                        placePhotos(dir, got)
                                     }
                                     host.toast("Добавлено из галереи: ${plural(n, "фото", "фото", "фото")}")
                                 }

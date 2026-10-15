@@ -38,6 +38,8 @@ import kg.osmotr.ui.Shot
 private var crashHooked = false
 
 class MainActivity : ComponentActivity(), Host {
+    private companion object { const val INCOMING = "incoming" }
+
     /** Описи, присланные через «Поделиться» / «Открыть с помощью». */
     private val incoming = mutableStateListOf<Picked>()
 
@@ -78,6 +80,8 @@ class MainActivity : ComponentActivity(), Host {
             val prior = Thread.getDefaultUncaughtExceptionHandler()
             Thread.setDefaultUncaughtExceptionHandler { t, e -> kg.osmotr.core.Telemetry.crash(e); prior?.uncaughtException(t, e) }
         }
+        // Присланное, которое так и не разложили, — прочь через сутки.
+        Thread { java.io.File(super.getCacheDir(), INCOMING).listFiles()?.forEach { if (System.currentTimeMillis() - it.lastModified() > 86_400_000L) it.delete() } }.start()
         take(intent)
         // Метки testTag — ещё и resource-id: обход на эмуляторе (tools/matrix) находит блоки по ним.
         setContent {
@@ -112,13 +116,28 @@ class MainActivity : ComponentActivity(), Host {
         Thread { val list = uris.mapNotNull(::read); runOnUiThread { incoming.addAll(list) } }.start()
     }
 
-    /** Файл по ссылке: имя (мессенджер не сказал — пусто, имя описи тогда — из книги) и содержимое. */
+    /**
+     * Файл по ссылке: имя (мессенджер не сказал — пусто, имя описи тогда — из книги) и содержимое.
+     * Фото — потоком во временный файл, не в память: из галереи выбирают до сотни снимков по
+     * нескольку мегабайт, и всё разом в памяти роняло бы приложение (нагрузочный тест 15.10.2026).
+     * Описи — в память: они маленькие и читаются целиком.
+     */
     private fun read(uri: Uri): Picked? = runCatching {
         val name = contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
             if (c.moveToFirst()) c.getString(0) else null
         } ?: uri.lastPathSegment?.substringAfterLast('/')?.takeIf { '.' in it } ?: ""
-        val bytes = contentResolver.openInputStream(uri)!!.use { it.readBytes() }
-        Picked(name, bytes, takenOf(bytes))
+        val image = contentResolver.getType(uri)?.startsWith("image/") == true ||
+            name.substringAfterLast('.', "").lowercase() in setOf("jpg", "jpeg", "heic", "heif", "png", "webp")
+        if (!image) {
+            val bytes = contentResolver.openInputStream(uri)!!.use { it.readBytes() }
+            return@runCatching Picked(name, bytes, takenOf(bytes))
+        }
+        val dir = java.io.File(super.getCacheDir(), INCOMING).apply { mkdirs() }
+        val tmp = java.io.File.createTempFile("in-", ".part", dir)
+        contentResolver.openInputStream(uri)!!.use { input -> tmp.outputStream().use { input.copyTo(it, 64 * 1024) } }
+        val head = tmp.inputStream().use { s -> ByteArray(16).let { b -> b.copyOf(s.read(b).coerceAtLeast(0)) } }
+        val taken = runCatching { androidx.exifinterface.media.ExifInterface(tmp.absolutePath).let { it.dateTimeOriginal ?: it.dateTime } }.getOrNull()
+        Picked.ofFile(name, kg.osmotr.core.File(tmp.absolutePath), taken, head)
     }.getOrNull()
 
     /** Когда снято — из EXIF (DateTimeOriginal, иначе DateTime); не фото или нет даты — null. */

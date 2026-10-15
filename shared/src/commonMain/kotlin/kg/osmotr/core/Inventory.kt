@@ -737,15 +737,27 @@ object Inventory {
     /** Описи лежат в папке объекта файлами «Опись — <имя>.xlsx» (видны и по USB). */
     const val PREFIX = "Опись — "
 
+    // Сначала имя (строка), потом «файл ли» (запрос к файловой системе): в папке описи тысячи папок
+    // предметов, и проверка каждой на каждую запись журнала — а журнал пишется на каждый снимок —
+    // делала нажатие в конце большой описи вшестеро дороже (нагрузочный тест 15.10.2026).
     private fun rawFiles(dir: File): List<File> = (dir.listFiles() ?: emptyArray())
-        .filter { it.isFile && it.name.startsWith(PREFIX) && it.name.endsWith(".xlsx", true) }.sortedBy { it.name }
+        .filter { it.name.startsWith(PREFIX) && it.name.endsWith(".xlsx", true) && it.isFile }.sortedBy { it.name }
 
     /**
      * Опись папки — одна (автор, 08.10.2026: «описи надо разделять, а не в кучу запихивать…
      * Опись → внутри как раньше было в папке „Осмотры“»). Каждая опись — своя папка в
      * «Осмотрах»: файл описи, отчёт, папки предметов.
      */
-    fun fileIn(dir: File): File? = rawFiles(dir).firstOrNull()
+    fun fileIn(dir: File): File? {
+        // Где файл описи — запомнено: проверить, что он на месте, — один запрос, а перечислять
+        // папку описи с тысячами папок предметов на каждую запись журнала дорого. Пропал или
+        // заменён — перечислить заново.
+        bookOf[dir.path]?.let { File(it) }?.takeIf { it.isFile }?.let { return it }
+        val f = rawFiles(dir).firstOrNull()
+        if (f != null) bookOf = bookOf + (dir.path to f.path)
+        return f
+    }
+    @kotlin.concurrent.Volatile private var bookOf: Map<String, String> = emptyMap()
     fun filesIn(dir: File): List<File> = listOfNotNull(fileIn(dir))
 
     /** Имя описи — из имени файла: «Опись — Объект.xlsx» → «Объект». */
@@ -992,6 +1004,8 @@ object Inventory {
     }
 
     fun status(obj: File): Status {
+        // Отметка — до обхода: правка посреди обхода сделает запомненное устаревшим, а не неверным.
+        val structure = Store.structure
         val folder = HashMap<String, File>()
         val photos = HashMap<File, Int>(); val first = HashMap<File, Long>(); val last = HashMap<File, Long>()
         // Снимки папки — со вложенными: сначала вглубь, потом сама папка.
@@ -1008,6 +1022,7 @@ object Inventory {
         }
         visit(obj)
         Folders.saveSoon()
+        index = index + (obj.path to FolderIndex(structure, folder))
         return Status(folder, photos, first, last, brokenOf(obj), earlierOf(obj), repairOf(obj))
     }
 
@@ -1181,13 +1196,32 @@ object Inventory {
     }
 
     /** Папка предмета: есть — её, нет — создать (имя — инвентарник). Сразу к снимкам. */
-    fun openFolder(obj: File, i: Item, st: Status = status(obj)): File {
-        st.folderOf(i)?.let { return it }
+    fun openFolder(obj: File, i: Item, st: Status? = null): File {
+        st?.folderOf(i)?.let { return it }
+        val k = key(id(i))
+        // Папки предметов — из последнего учёта, пока структура папок не менялась (снимки её не
+        // меняют): иначе каждое нажатие «снять» обходило все папки описи, и к 3 000-й папке
+        // нажатие стоило вшестеро больше первого (нагрузочный тест 15.10.2026). Запомненная
+        // папка пропала — по свежему учёту.
+        var base: Map<String, File>? = null
+        if (st == null) {
+            val cached = index[obj.path]?.takeIf { it.structure == Store.structure }?.folder
+            val hit = cached?.get(k)
+            base = if (cached != null && (hit == null || hit.isDirectory)) cached else status(obj).folder
+            base[k]?.takeIf { it.isDirectory }?.let { return it }
+        }
         val dir = unique(obj, folderName(i))
         writeMembers(dir, listOf(id(i)))
         Store.changed()
+        // Новая папка — в запомненное, с новой отметкой: следующее нажатие не обходит всё.
+        if (base != null) index = index + (obj.path to FolderIndex(Store.structure, base + (k to dir)))
         return dir
     }
+
+    /** Предмет → папка по последнему учёту описи и отметка структуры, при которой он снят. */
+    private class FolderIndex(val structure: Long, val folder: Map<String, File>)
+    /** Заменяется целиком (из разных потоков): гонка даёт устаревшее, а не испорченное. */
+    @kotlin.concurrent.Volatile private var index: Map<String, FolderIndex> = emptyMap()
 
     /**
      * Собрать предметы в одну папку («ходим по описи и отмечаем, что в папке»): папка первого,
@@ -1505,10 +1539,15 @@ object Inventory {
         if (!first) return
         reportScope.launch {
             do {
-                // Серия снимков — одна пересборка: ждём, пока правки утихнут.
-                kotlinx.coroutines.delay(REPORT_QUIET_MS)
+                // Серия снимков — одна пересборка: ждём, пока правки утихнут. Большая опись — дольше:
+                // не чаще, чем раз в пять своих сборок (опись на 10 000 строк собирается секунды, и
+                // пересборка после каждого снятого пункта держала процессор занятым весь выезд).
+                // Выгрузка собирает отчёт сама — свежесть при отправке от паузы не зависит.
+                kotlinx.coroutines.delay(maxOf(REPORT_QUIET_MS, (lastBuild[k] ?: 0L) * 5))
                 kotlinx.atomicfu.locks.synchronized(reportsLock) { reports[k] = false }
+                val t0 = Platform.nowMs()
                 val ok = runCatching { writeReport(obj) }.onFailure { Telemetry.error("отчёт описи ${Telemetry.id(obj.name)}", it) }.isSuccess
+                lastBuild = lastBuild + (k to (Platform.nowMs() - t0))
                 val again = kotlinx.atomicfu.locks.synchronized(reportsLock) {
                     if (reports[k] == true) true
                     else { if (ok) staleMark(obj).delete(); reports.remove(k); false }
@@ -1537,6 +1576,8 @@ object Inventory {
     private fun staleMark(obj: File) = File(Store.cacheDir, "stale-reports/" + obj.path.hashCode().toUInt() + ".txt")
     /** Сколько ждать тишины после правки, прежде чем собирать отчёт. */
     var REPORT_QUIET_MS = 1500L
+    /** Сколько шла прошлая сборка отчёта описи (по пути) — от неё пауза до следующей. */
+    @kotlin.concurrent.Volatile private var lastBuild: Map<String, Long> = emptyMap()
 
     /** Объект → «просили ещё раз, пока собирали». */
     private val reports = HashMap<String, Boolean>()

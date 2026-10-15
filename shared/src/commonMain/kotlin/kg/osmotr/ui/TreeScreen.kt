@@ -108,7 +108,7 @@ fun TreeScreen(current: File, open: (File) -> Unit, close: () -> Unit, place: Li
                         val dir = resolve() ?: run { placing = false; return@launch }
                         open(dir)
                         val n = withContext(Dispatchers.IO) {
-                            Store.addPhotos(dir, place!!.map { Triple(it.name, it.bytes, it.takenMs) }).also { Inventory.refreshReportSoon(dir) }.size
+                            placePhotos(dir, place!!)
                         }
                         host.toast("Добавлено в «${dir.name}»: ${plural(n, "фото", "фото", "фото")}")
                     }
