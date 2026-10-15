@@ -301,6 +301,16 @@ class Run:
     def look(self, what):
         time.sleep(1.2)
         f = self.dev.focus()
+        # «System UI isn't responding» на только что загруженном эмуляторе — окно системы, не наше:
+        # «Подождать» и смотреть снова.
+        for _ in range(3):
+            if f != 'Application':
+                break
+            n = self.dev.dump().find('Wait', exact=True) or self.dev.dump().find('Подождать', exact=True)
+            if n is None:
+                break
+            self.dev.tap_node(n); time.sleep(3)
+            f = self.dev.focus()
         if 'Pop-Up' in f:
             time.sleep(1)  # меню ещё раскрывается — снимок застал бы окно под ним
         # Меню «⋮» и подсказки — свои всплывающие окна «Осмотра» (Pop-Up), выбор файлов — системный.
@@ -398,6 +408,51 @@ def fresh(r):
     r.dev.launch(); r.look('главная')
     view(r, 'matrix-good.xlsx', 'загрузить опись пути')
     r.expect('опись открылась', has=['из 12 осмотрено', 'МТ-101'])
+
+
+def p_camera(r):
+    """
+    Съёмка штатной камерой (15.10.2026): кадры — в папке предмета, файлы целы, записи галереи ведут
+    туда, на старых местах записей нет. 3.8 до исправления стирала каждый снимок: удаление записи
+    галереи по номеру после переноса удаляло сам файл (Android 11+ переводит запись при переносе).
+    Модульный тест (GalleryRowTest) держит правило; этот путь — настоящий MediaProvider.
+    """
+    fresh(r)
+    def rows():
+        out = sh('content', 'query', '--uri', 'content://media/external/images/media', '--projection', '_data')
+        return [l.split('_data=')[-1].strip() for l in out.splitlines() if '_data=' in l]
+    r.tap('Снять', 'снять МТ-101', look=False)
+    time.sleep(5)
+    for _ in range(3):   # первый запуск камеры — окно разрешений
+        scr = r.dev.dump(); n = scr.find('confirm_button') or scr.find('While using the app') or scr.find('При использовании')
+        if n is None:
+            break
+        r.dev.tap_node(n); time.sleep(3)
+    scr = r.dev.dump(); shutter = scr.find('shutter_button')
+    if shutter is None:
+        r.steps.append({'что': 'камера открылась', 'ок': False, 'было': scr.texts()[:20], 'ждали': 'спуск камеры'}); raise Fail()
+    for _ in range(2):
+        r.dev.tap_node(shutter); time.sleep(6)   # камера эмулятора сохраняет кадр ~2–4 с
+    shot = [p for p in rows() if '/Pictures/' in p or '/DCIM/' in p]
+    sh('input', 'keyevent', '4')
+    time.sleep(10)
+    r.look('вернулись из камеры')
+    files = [l.strip() for l in sh('find', ROOT, '-path', '*МТ-101*', '-name', '*.jpg').splitlines() if l.strip()]
+    now = rows()
+    # Каждый снятый кадр — в папке предмета (сколько сняла камера эмулятора — столько и должно лечь).
+    ok = len(shot) >= 1 and len(files) >= len(shot)
+    r.steps.append({'что': 'кадры в папке предмета', 'ок': ok, 'было': {'сняли': shot, 'в папке': files}, 'ждали': 'все снятые — в папке МТ-101'})
+    if not ok:
+        raise Fail()
+    stale = [p for p in shot if p in now]
+    # find отдаёт пути через /sdcard, галерея хранит те же файлы как /storage/emulated/0.
+    same = lambda x: x.replace('/sdcard/', '/storage/emulated/0/', 1)
+    lost = [f for f in files if same(f) not in {same(x) for x in now}]
+    ok = not stale and not lost
+    r.steps.append({'что': 'галерея: записи на новом месте, на старом нет', 'ок': ok,
+                    'было': {'остались на старом месте': stale, 'нет записи у снимка': lost}, 'ждали': 'пусто и пусто'})
+    if not ok:
+        raise Fail()
 
 
 # Пути. Каждый начинает с чистого запуска и своей свежей описи.
@@ -570,6 +625,7 @@ PATHS = {
     'битый, PDF, без списка, повтор': p_bad_files,
     'замена чужой описью — спросить': p_replace_wrong,
     'экраны: папки, поиск, дерево': p_screens,
+    'съёмка: кадры в папке, галерея цела': p_camera,
 }
 
 
