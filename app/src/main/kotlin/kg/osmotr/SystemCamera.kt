@@ -44,7 +44,7 @@ object SystemCamera {
      * приложение не узнало бы, что снимало, и снимки остались бы в DCIM (отзыв 15.10.2026:
      * «сфотала несколько фоток, потом вышла, и он мне не добавил»).
      */
-    private fun end(context: Context, s: Session) {
+    internal fun end(context: Context, s: Session) {
         val p = context.getSharedPreferences(PREFS, 0)
         if (p.getLong("started", -1) == s.startedMs && p.getString("dir", null) == s.dir.absolutePath) p.edit().clear().commit()
     }
@@ -81,12 +81,13 @@ object SystemCamera {
      * HDR и т. п. — секунды), поэтому снятое собирается несколько раз, пока новых не будет
      * [settleMs]. Заход закрывается: следующий начнётся с нового «Снимать».
      */
-    suspend fun collect(context: Context, settleMs: Long = 2500): Imported? {
+    suspend fun collect(context: Context, settleMs: Long = 2500,
+                        importer: (Context, Session) -> Int = ::importOnce): Imported? {
         val s = session(context) ?: return null
         var total = 0
         var quietSince = System.currentTimeMillis()
         while (System.currentTimeMillis() - quietSince < settleMs) {
-            val n = сбор.withLock { withContext(Dispatchers.IO) { importOnce(context, s) } }
+            val n = сбор.withLock { withContext(Dispatchers.IO) { importer(context, s) } }
             if (n > 0) { total += n; quietSince = System.currentTimeMillis() }
             delay(500)
         }
@@ -150,7 +151,7 @@ object SystemCamera {
      * Копия, когда переименовать нельзя (другой том): во временный файл и переименованием —
      * обрезанный файл под именем снимка не появится никогда.
      */
-    private fun copyWhole(from: File, to: File): Boolean = runCatching {
+    internal fun copyWhole(from: File, to: File): Boolean = runCatching {
         val tmp = File(to.parentFile, "." + to.name + ".part")
         from.copyTo(tmp, overwrite = true)
         if (tmp.length() != from.length() || !tmp.renameTo(to)) { tmp.delete(); return false }

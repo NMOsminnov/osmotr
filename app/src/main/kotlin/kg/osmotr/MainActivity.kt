@@ -116,29 +116,7 @@ class MainActivity : ComponentActivity(), Host {
         Thread { val list = uris.mapNotNull(::read); runOnUiThread { incoming.addAll(list) } }.start()
     }
 
-    /**
-     * Файл по ссылке: имя (мессенджер не сказал — пусто, имя описи тогда — из книги) и содержимое.
-     * Фото — потоком во временный файл, не в память: из галереи выбирают до сотни снимков по
-     * нескольку мегабайт, и всё разом в памяти роняло бы приложение (нагрузочный тест 15.10.2026).
-     * Описи — в память: они маленькие и читаются целиком.
-     */
-    private fun read(uri: Uri): Picked? = runCatching {
-        val name = contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
-            if (c.moveToFirst()) c.getString(0) else null
-        } ?: uri.lastPathSegment?.substringAfterLast('/')?.takeIf { '.' in it } ?: ""
-        val image = contentResolver.getType(uri)?.startsWith("image/") == true ||
-            name.substringAfterLast('.', "").lowercase() in setOf("jpg", "jpeg", "heic", "heif", "png", "webp")
-        if (!image) {
-            val bytes = contentResolver.openInputStream(uri)!!.use { it.readBytes() }
-            return@runCatching Picked(name, bytes, takenOf(bytes))
-        }
-        val dir = java.io.File(super.getCacheDir(), INCOMING).apply { mkdirs() }
-        val tmp = java.io.File.createTempFile("in-", ".part", dir)
-        contentResolver.openInputStream(uri)!!.use { input -> tmp.outputStream().use { input.copyTo(it, 64 * 1024) } }
-        val head = tmp.inputStream().use { s -> ByteArray(16).let { b -> b.copyOf(s.read(b).coerceAtLeast(0)) } }
-        val taken = runCatching { androidx.exifinterface.media.ExifInterface(tmp.absolutePath).let { it.dateTimeOriginal ?: it.dateTime } }.getOrNull()
-        Picked.ofFile(name, kg.osmotr.core.File(tmp.absolutePath), taken, head)
-    }.getOrNull()
+    private fun read(uri: Uri): Picked? = readPicked(contentResolver, uri, java.io.File(super.getCacheDir(), INCOMING))
 
     /** Когда снято — из EXIF (DateTimeOriginal, иначе DateTime); не фото или нет даты — null. */
     private fun takenOf(bytes: ByteArray): Long? = runCatching {

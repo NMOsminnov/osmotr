@@ -303,6 +303,11 @@ class InventoryTest {
         val summary = book.first { it.name == "Итог" }.rows
         assertEquals("2", summary[1][summary[0].indexOf("Требуют ремонта")])
         assertEquals("1", summary[1][summary[0].indexOf("Нерабочих")])
+        // «По дням» — столбец отметок «требуется ремонт» (журнал): сегодня — a, b, затем c.
+        val days = book.first { it.name == "По дням" }.rows
+        val col = days[0].indexOf("Отмечено «требуется ремонт»")
+        assertTrue("столбец есть", col >= 0)
+        assertEquals("3", days.last()[col])
         // Сняли все отметки — файлов нет.
         Inventory.setRepair(obj, listOf(a, c), false); Inventory.setBroken(obj, listOf(b), false)
         assertTrue(!File(obj, Inventory.REPAIR).exists() && !File(obj, Inventory.BROKEN).exists())

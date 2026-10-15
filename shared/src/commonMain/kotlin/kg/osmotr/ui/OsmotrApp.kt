@@ -102,7 +102,7 @@ private fun Body(host: Host, incoming: SnapshotStateList<Picked>, start: List<Sc
     if (InventoryImport.jobs.isNotEmpty()) ImportDialog(InventoryImport.jobs, onClose = { InventoryImport.jobs.clear() })
     val snackbar = remember { SnackbarHostState() }
     // Плашка про снятое — всегда про последний предмет: прежняя (и ждущая очереди) снимается.
-    val shotBanner = remember { arrayOfNulls<kotlinx.coroutines.Job>(1) }
+    val shotBanner = remember { LatestBanner() }
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
         // Папки могли поменять с компьютера, пока приложение было в фоне: перечитать, а
         // исчезнувшую — сменить ближайшей существующей.
@@ -131,12 +131,8 @@ private fun Body(host: Host, incoming: SnapshotStateList<Picked>, start: List<Sc
                     // 15.10.2026: «хочу через уведомление быстро зайти в 5, а там ещё только 2 висит»).
                     // Без срока плашка с действием висела до нажатия — теперь уходит сама, смахивается,
                     // с крестиком.
-                    shotBanner[0]?.cancel()
-                    snackbar.currentSnackbarData?.dismiss()
-                    shotBanner[0] = launch {
-                        val r = snackbar.showSnackbar("${got.dir.name}: +${plural(got.count, "снимок", "снимка", "снимков")}", actionLabel = "Открыть",
-                            withDismissAction = true, duration = SnackbarDuration.Short)
-                        if (r == SnackbarResult.ActionPerformed) stack.add(Screen.Browser(got.dir))
+                    shotBanner.show(scope, snackbar, "${got.dir.name}: +${plural(got.count, "снимок", "снимка", "снимков")}", "Открыть") {
+                        stack.add(Screen.Browser(got.dir))
                     }
                 }
                 return@launch
