@@ -14,6 +14,9 @@ import kotlinx.coroutines.IO
 
 import androidx.compose.ui.backhandler.BackHandler
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -48,7 +51,8 @@ import kotlinx.coroutines.launch
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun TreeScreen(current: File, open: (File) -> Unit, close: () -> Unit, place: List<Picked>? = null) {
+fun TreeScreen(current: File, open: (File) -> Unit, close: () -> Unit, place: List<Picked>? = null,
+               query: String = "", onQuery: (String) -> Unit = {}) {
     val host = LocalHost.current
     var allOpen by rememberSaveable { mutableStateOf(true) }
     val selected = remember { mutableStateListOf<File>() }
@@ -104,19 +108,45 @@ fun TreeScreen(current: File, open: (File) -> Unit, close: () -> Unit, place: Li
                     confirm = null
                     if (placing) return@TextButton
                     placing = true
+                    // Папка заводится здесь, а снимки пишет приложение (open): экран дерева закрывается
+                    // сразу, и запись в его области отменилась бы на полпути.
                     scope.launch {
                         val dir = resolve() ?: run { placing = false; return@launch }
                         open(dir)
-                        val n = withContext(Dispatchers.IO) {
-                            placePhotos(dir, place!!)
-                        }
-                        host.toast("Добавлено в «${dir.name}»: ${plural(n, "фото", "фото", "фото")}")
                     }
                 }, modifier = Modifier.testTag("положить")) { Text("Положить") } },
                 dismissButton = { androidx.compose.material3.TextButton(onClick = { confirm = null }) { Text("Назад") } },
             )
         }
-        FolderTree(current = current, onPick = pick, allOpen = allOpen, onMove = if (place == null) move else null, selected = selected,
-            modifier = Modifier.fillMaxSize().padding(inner))
+        // «+» у папки: при раскладке — то же окно, что по касанию (сюда или новая папка); в «Структуре» —
+        // завести папку и остаться в дереве.
+        var creating by remember { mutableStateOf<File?>(null) }
+        creating?.let { dir ->
+            PlaceInFolderDialog(dir, null, place = { where, resolve ->
+                creating = null
+                scope.launch {
+                    val made = resolve()
+                    snackbar.currentSnackbarData?.dismiss()
+                    snackbar.showSnackbar(if (made != null) "Создана: ${Store.title(made)}" else "Не создана: $where", duration = SnackbarDuration.Short, withDismissAction = true)
+                }
+            }, dismiss = { creating = null })
+        }
+        androidx.compose.foundation.layout.Column(Modifier.fillMaxSize().padding(inner)) {
+            // Поиск по папкам — и при раскладке присланного, и в «Структуре» (отзыв 15.10.2026: «поиск тоже»).
+            androidx.compose.material3.OutlinedTextField(query, onQuery,
+                Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp).testTag("поиск в дереве"), singleLine = true,
+                placeholder = { Text("Найти папку: название или номер") },
+                leadingIcon = { Icon(androidx.compose.material.icons.Icons.Default.Search, null) },
+                trailingIcon = { if (query.isNotEmpty()) IconButton(onClick = { onQuery("") }) { Icon(Icons.Default.Close, "Очистить") } },
+                shape = androidx.compose.foundation.shape.RoundedCornerShape(24.dp))
+            if (place != null) Text("Коснитесь папки — положить сюда. «+» справа — новая папка внутри (по инвентарнику или названию).",
+                Modifier.padding(horizontal = 16.dp, vertical = 2.dp), style = androidx.compose.material3.MaterialTheme.typography.bodySmall,
+                color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant)
+            FolderTree(current = current, onPick = pick, allOpen = allOpen, onMove = if (place == null && query.isBlank()) move else null, selected = selected,
+                filter = query,
+                // При раскладке «+» — тем же окном «сюда / новая папка»; в «Структуре» — только новая папка.
+                onCreateIn = { d -> if (place != null) { if (!placing) target = d } else creating = d },
+                modifier = Modifier.fillMaxWidth().weight(1f))
+        }
     }
 }

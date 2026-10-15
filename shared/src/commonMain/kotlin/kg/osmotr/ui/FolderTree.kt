@@ -55,6 +55,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
@@ -125,6 +126,10 @@ fun FolderTree(
     allOpen: Boolean? = null,
     onMove: ((List<File>, File) -> Unit)? = null,
     selected: SnapshotStateList<File>? = null,
+    /** Поиск: непустой — вместо дерева найденные папки списком, с путём. */
+    filter: String = "",
+    /** «+» у папки — новая папка внутри неё (отзыв 15.10.2026: «в дереве не вижу возможности создавать папки»). */
+    onCreateIn: ((File) -> Unit)? = null,
 ) {
     val version by Store.version.collectAsStateWithLifecycle()
     val tree = rememberLoaded("структура", version) { Tree.build() }
@@ -141,9 +146,17 @@ fun FolderTree(
         }
     }
     val t = tree ?: return
-    data class Line(val dir: File, val depth: Int)
-    val rows = remember(t, open.toList()) {
-        buildList {
+    data class Line(val dir: File, val depth: Int, val path: String? = null)
+    val q = filter.trim()
+    val rows = remember(t, open.toList(), q) {
+        if (q.isNotEmpty()) {
+            // Поиск — по всем папкам, раскрыты они или нет: по имени и по номеру без разделителей.
+            val k = Search.compact(q)
+            val all = buildList { fun walk(d: File) { t.children[d].orEmpty().forEach { add(it); walk(it) } }; walk(Store.root) }
+            all.filter { d -> d.name.contains(q, ignoreCase = true) || (k.isNotEmpty() && Search.compact(d.name).contains(k)) }
+                .sortedBy { it.name.lowercase() }.take(200)
+                .map { d -> Line(d, 0, d.parentFile?.let { if (it == Store.root) "Осмотры" else Store.title(it) }) }
+        } else buildList {
             fun add(dir: File, depth: Int) {
                 add(Line(dir, depth))
                 if (dir in open || dir == Store.root) t.children[dir].orEmpty().forEach { add(it, depth + 1) }
@@ -246,7 +259,7 @@ fun FolderTree(
                                 else -> onPick(r.dir)
                             }
                         }
-                        .padding(end = 10.dp)
+                        .padding(end = if (onCreateIn != null) 2.dp else 10.dp)
                         .then(if (off) Modifier.alpha(0.35f) else Modifier),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
@@ -261,11 +274,16 @@ fun FolderTree(
                     Icon(when { picked -> Icons.Default.CheckCircle; r.dir == Store.root -> Icons.Default.Home; else -> AppIcons.Folder },
                         null, Modifier.size(20.dp),
                         tint = if (picked || on) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondary)
-                    Text(
-                        if (r.dir == Store.root) "Осмотры" else r.dir.name,
-                        Modifier.weight(1f).padding(start = 10.dp), maxLines = 1, overflow = TextOverflow.Ellipsis,
-                        fontWeight = if (on || picked) FontWeight.SemiBold else FontWeight.Normal,
-                    )
+                    androidx.compose.foundation.layout.Column(Modifier.weight(1f).padding(start = 10.dp)) {
+                        Text(
+                            if (r.dir == Store.root) "Осмотры" else r.dir.name,
+                            maxLines = 1, overflow = TextOverflow.Ellipsis,
+                            fontWeight = if (on || picked) FontWeight.SemiBold else FontWeight.Normal,
+                        )
+                        // Найденное поиском — с путём: одинаковые имена в разных описях различимы.
+                        if (r.path != null) Text(r.path, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                            style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
                     val dim = MaterialTheme.colorScheme.onSurfaceVariant
                     if (r.dir in t.notes) Icon(AppIcons.Notes, "Есть комментарий", Modifier.padding(end = 6.dp).size(16.dp), tint = dim)
                     if (r.dir in t.contacts) Icon(Icons.Default.Person, "Есть контакты", Modifier.padding(end = 8.dp).size(16.dp), tint = dim)
@@ -275,6 +293,11 @@ fun FolderTree(
                     if (nf > 0) Count(AppIcons.Folder, nf, "папок внутри")
                     if (np > 0) Count(AppIcons.PhotoLibrary, np, "снимков внутри")
                     else Text("пусто", Modifier.padding(start = if (nf > 0) 8.dp else 0.dp), style = MaterialTheme.typography.labelMedium, color = dim.copy(alpha = 0.5f))
+                    if (onCreateIn != null) androidx.compose.material3.IconButton(onClick = { onCreateIn(r.dir) },
+                        Modifier.size(40.dp).testTag("новая папка в")) {
+                        Icon(AppIcons.CreateNewFolder, "Новая папка в «${if (r.dir == Store.root) "Осмотры" else r.dir.name}»",
+                            Modifier.size(20.dp), tint = MaterialTheme.colorScheme.primary)
+                    }
                 }
             }
         }

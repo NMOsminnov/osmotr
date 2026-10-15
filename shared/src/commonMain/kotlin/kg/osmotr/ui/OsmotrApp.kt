@@ -58,7 +58,8 @@ sealed interface Screen {
     data class Search(val here: File, val query: String? = null, val place: List<Picked>? = null) : Screen
     data class Contacts(val dir: File) : Screen
     /** [place] — присланные фото («Поделиться» из WhatsApp): выбрать папку, куда их положить. */
-    data class Tree(val here: File, val place: List<Picked>? = null) : Screen
+    /** [here] — последняя открытая из дерева папка: вернулись — дерево раскрыто до неё; [query] — поиск. */
+    data class Tree(val here: File, val place: List<Picked>? = null, val query: String = "") : Screen
     /** [into] — набираем предметы в эту папку (касание — добавить/убрать). */
     data class Inventory(val obj: File, val into: File? = null, val query: String? = null) : Screen
 }
@@ -214,7 +215,9 @@ private fun Body(host: Host, incoming: SnapshotStateList<Picked>, start: List<Sc
                 // Присланное кладётся один раз (см. TreeScreen): второе касание, пока пишутся снимки, клало их дважды.
                 val placed = remember(place) { booleanArrayOf(false) }
                 SearchScreen(here = top.here, initial = top.query.orEmpty(), close = { pop() }, place = place?.size,
-                    tree = place?.let { p -> { replaceTop(Screen.Tree(Store.root, place = p)) } },
+                    // Дерево — поверх поиска: «назад» из него возвращает к поиску, а не на главный
+                    // (отзыв 15.10.2026: «возврат ведёт на главную, а не в предыдущее меню»).
+                    tree = place?.let { p -> { push(Screen.Tree(Store.root, place = p)) } },
                     open = { dir ->
                         if (place == null) replaceTop(Screen.Browser(dir))
                         // Присланные фото — в найденную папку снимками; папка открывается сразу, снимки
@@ -235,7 +238,30 @@ private fun Body(host: Host, incoming: SnapshotStateList<Picked>, start: List<Sc
                 // Папка после набора могла переименоваться — вернуться в неё по новому имени.
                 picked = { dir -> pop(); replaceTop(Screen.Browser(dir)) },
                 contacts = { push(Screen.Contacts(it)) })
-            is Screen.Tree -> TreeScreen(current = top.here, place = top.place, open = { replaceTop(Screen.Browser(it)) }, close = { pop() })
+            is Screen.Tree -> {
+                val placed = remember(top.place) { booleanArrayOf(false) }
+                TreeScreen(current = top.here, place = top.place, open = { d ->
+                    val place = top.place
+                    // Разложили присланное — дерево и поиск под ним своё отработали: в папку, а «назад»
+                    // из неё — туда, откуда начинали, не обратно к раскладке. Снимки пишутся здесь, в
+                    // области приложения, — один раз.
+                    if (place != null) {
+                        if (placed[0]) return@TreeScreen
+                        placed[0] = true
+                        pop(); if ((stack.last() as? Screen.Search)?.place != null) pop(); push(Screen.Browser(d))
+                        scope.launch {
+                            val n = withContext(Dispatchers.IO) { placePhotos(d, place) }
+                            snackbar.showSnackbar("${plural(n, "фото", "фото", "фото")} → ${Store.title(d)}", duration = SnackbarDuration.Long, withDismissAction = true)
+                        }
+                    } else {
+                        // Путь помнится (автор, 15.10.2026: «выход из папки тоже возвращает на главную,
+                        // даже если я из дерева заходил… Путь надо помнить»): папка — поверх дерева, а
+                        // дерево запоминает её — «назад» вернёт в дерево, раскрытое до неё и с ней на виду.
+                        stack[stack.lastIndex] = top.copy(here = d)
+                        push(Screen.Browser(d))
+                    }
+                }, close = { pop() }, query = top.query, onQuery = { q -> stack[stack.lastIndex] = top.copy(query = q) })
+            }
             is Screen.Contacts -> ContactsScreen(dir = top.dir, close = { pop() })
             is Screen.Viewer -> ViewerScreen(dir = top.dir, start = top.start, close = { pop() })
         }

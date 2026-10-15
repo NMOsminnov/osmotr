@@ -39,7 +39,25 @@ import kotlinx.coroutines.withContext
  * [place] получает, как найти папку: она заводится только после выбора (как в поиске).
  */
 @Composable
-fun PlaceInFolderDialog(dir: File, count: Int, place: (where: String, resolve: suspend () -> File?) -> Unit, dismiss: () -> Unit) {
+fun PlaceInFolderDialog(dir: File, count: Int?, place: (where: String, resolve: suspend () -> File?) -> Unit, dismiss: () -> Unit) {
+    // [count] — сколько присланных фото; null — просто завести папку (дерево «Структура», «+» у папки).
+    val here = if (dir == Store.root) "Осмотры" else Store.title(dir)
+    AlertDialog(
+        onDismissRequest = dismiss,
+        title = { Text(if (count == null) "Новая папка в «$here»" else "${plural(count, "фото", "фото", "фото")} — куда?") },
+        text = { DialogBody { PlaceFolderChooser(dir, count, place) } },
+        // Выбор — строками выше; внизу только «Назад».
+        confirmButton = { TextButton(onClick = dismiss) { Text("Назад") } },
+    )
+}
+
+/**
+ * Содержимое окна «куда / новая папка»: «Сюда», поле «инвентарник или название», найденные
+ * предметы описи и «Новая папка «…»». Отдельно от окна — проверяется тестом без всплывающего
+ * окна (Robolectric не успокаивается с полем ввода во всплывающем окне).
+ */
+@Composable
+fun PlaceFolderChooser(dir: File, count: Int?, place: (where: String, resolve: suspend () -> File?) -> Unit) {
     var text by remember { mutableStateOf("") }
     // Опись, в которой папка: сама она или ближайшая выше, где лежит файл описи.
     val obj = remember(dir) {
@@ -58,35 +76,27 @@ fun PlaceInFolderDialog(dir: File, count: Int, place: (where: String, resolve: s
         }
     }
     val here = if (dir == Store.root) "Осмотры" else Store.title(dir)
-    AlertDialog(
-        onDismissRequest = dismiss,
-        title = { Text("${plural(count, "фото", "фото", "фото")} — куда?") },
-        text = { DialogBody {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (dir != Store.root) Row(Modifier.fillMaxWidth().clickable { place(here) { dir } }.padding(vertical = 10.dp).testTag("положить сюда"),
-                    verticalAlignment = Alignment.CenterVertically) {
-                    Icon(AppIcons.Folder, null, tint = MaterialTheme.colorScheme.primary)
-                    Text("  Сюда: $here", style = MaterialTheme.typography.bodyLarge, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                }
-                OutlinedTextField(text, { text = it }, Modifier.fillMaxWidth().testTag("новая папка поле"), singleLine = true,
-                    label = { Text(if (obj != null) "Новая папка: инвентарник или название" else "Новая папка: название") })
-                found.forEach { i ->
-                    Row(Modifier.fillMaxWidth().clickable {
-                        place("${Store.title(obj!!)} › предмет ${i.inventory} — ${i.name}") { withContext(Dispatchers.IO) { Inventory.openFolder(obj, i) } }
-                    }.padding(vertical = 8.dp).testTag("папка предмета"), verticalAlignment = Alignment.CenterVertically) {
-                        Icon(AppIcons.CreateNewFolder, null, tint = MaterialTheme.colorScheme.primary)
-                        Text("  ${i.inventory} — ${i.name}", maxLines = 2, overflow = TextOverflow.Ellipsis)
-                    }
-                }
-                if (q.isNotEmpty()) Row(Modifier.fillMaxWidth().clickable {
-                    place("$here › $q (новая папка)") { withContext(Dispatchers.IO) { Store.createFolder(dir, q) ?: File(dir, Store.cleanName(q)).takeIf { it.isDirectory } } }
-                }.padding(vertical = 8.dp).testTag("новая папка по названию"), verticalAlignment = Alignment.CenterVertically) {
-                    Icon(AppIcons.CreateNewFolder, null, tint = MaterialTheme.colorScheme.primary)
-                    Text("  Новая папка «$q» в «$here»", maxLines = 2, overflow = TextOverflow.Ellipsis)
-                }
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        if (count != null && dir != Store.root) Row(Modifier.fillMaxWidth().clickable { place(here) { dir } }.padding(vertical = 10.dp).testTag("положить сюда"),
+            verticalAlignment = Alignment.CenterVertically) {
+            Icon(AppIcons.Folder, null, tint = MaterialTheme.colorScheme.primary)
+            Text("  Сюда: $here", style = MaterialTheme.typography.bodyLarge, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        }
+        OutlinedTextField(text, { text = it }, Modifier.fillMaxWidth().testTag("новая папка поле"), singleLine = true,
+            label = { Text(if (obj != null) "Новая папка: инвентарник или название" else "Новая папка: название") })
+        found.forEach { i ->
+            Row(Modifier.fillMaxWidth().clickable {
+                place("${Store.title(obj!!)} › предмет ${i.inventory} — ${i.name}") { withContext(Dispatchers.IO) { Inventory.openFolder(obj, i) } }
+            }.padding(vertical = 8.dp).testTag("папка предмета"), verticalAlignment = Alignment.CenterVertically) {
+                Icon(AppIcons.CreateNewFolder, null, tint = MaterialTheme.colorScheme.primary)
+                Text("  ${i.inventory} — ${i.name}", maxLines = 2, overflow = TextOverflow.Ellipsis)
             }
-        } },
-        confirmButton = {},
-        dismissButton = { TextButton(onClick = dismiss) { Text("Назад") } },
-    )
+        }
+        if (q.isNotEmpty()) Row(Modifier.fillMaxWidth().clickable {
+            place("$here › $q (новая папка)") { withContext(Dispatchers.IO) { Store.createFolder(dir, q) ?: File(dir, Store.cleanName(q)).takeIf { it.isDirectory } } }
+        }.padding(vertical = 8.dp).testTag("новая папка по названию"), verticalAlignment = Alignment.CenterVertically) {
+            Icon(AppIcons.CreateNewFolder, null, tint = MaterialTheme.colorScheme.primary)
+            Text("  Новая папка «$q» в «$here»", maxLines = 2, overflow = TextOverflow.Ellipsis)
+        }
+    }
 }
