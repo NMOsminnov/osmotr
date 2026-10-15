@@ -272,6 +272,42 @@ class InventoryTest {
         assertTrue(Inventory.status(obj).let { st -> !st.today(p.items.first { it.inventory == "М-205" }) })
     }
 
+    @Test fun требуется_ремонт_одно_из_двух_с_нерабочим_и_в_отчёте() {
+        // Отзыв 15.10.2026: «помимо „нерабочее на списание“ просто „требуется ремонт“».
+        val obj = objectWithInventory()
+        val items = Inventory.parse(Inventory.fileIn(obj)!!).items
+        val (a, b, c) = items.filter { it.name.startsWith("Серверный") }.take(3).let { Triple(it[0], it[1], it.getOrElse(2) { items.first { x -> x.inventory == "777/1011" } }) }
+        // Как «нерабочее» — только снятое.
+        assertEquals(0, Inventory.setRepair(obj, listOf(a), true))
+        listOf(a, b, c).forEach { photo(Inventory.openFolder(obj, it), "a.jpg") }
+        assertEquals(2, Inventory.setRepair(obj, listOf(a, b), true))
+        Inventory.setBroken(obj, listOf(c), true)
+        var st = Inventory.status(obj)
+        assertTrue(st.repair(a) && st.repair(b) && !st.broken(a))
+        assertTrue(st.broken(c) && !st.repair(c))
+        // Одно из двух: «на списание» снимает «ремонт», и наоборот.
+        Inventory.setBroken(obj, listOf(b), true)
+        Inventory.setRepair(obj, listOf(c), true)
+        st = Inventory.status(obj)
+        assertTrue(st.broken(b) && !st.repair(b))
+        assertTrue(st.repair(c) && !st.broken(c))
+        assertEquals(listOf(Inventory.id(a), Inventory.id(c)), File(obj, Inventory.REPAIR).readLines())
+        assertEquals(listOf(Inventory.id(b)), File(obj, Inventory.BROKEN).readLines())
+
+        Inventory.writeReport(obj)
+        val book = Xlsx.sheets(Inventory.reportFile(Inventory.fileIn(obj)!!).readBytes())
+        val list = book.first { it.name == "Опись" }.rows
+        val head = list[0]
+        assertEquals("Требуется ремонт", list.first { it.getOrNull(1) == a.inventory }[head.indexOf("Состояние")])
+        assertEquals("Нерабочее", list.first { it.getOrNull(1) == b.inventory }[head.indexOf("Состояние")])
+        val summary = book.first { it.name == "Итог" }.rows
+        assertEquals("2", summary[1][summary[0].indexOf("Требуют ремонта")])
+        assertEquals("1", summary[1][summary[0].indexOf("Нерабочих")])
+        // Сняли все отметки — файлов нет.
+        Inventory.setRepair(obj, listOf(a, c), false); Inventory.setBroken(obj, listOf(b), false)
+        assertTrue(!File(obj, Inventory.REPAIR).exists() && !File(obj, Inventory.BROKEN).exists())
+    }
+
     @Test fun нерабочее_отмечается_только_после_снимков_и_уходит_в_отчёт() {
         val obj = objectWithInventory()
         val items = Inventory.parse(Inventory.fileIn(obj)!!).items

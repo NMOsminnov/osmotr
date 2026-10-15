@@ -13,7 +13,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarDuration
-import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Surface
@@ -101,6 +100,8 @@ private fun Body(host: Host, incoming: SnapshotStateList<Picked>, start: List<Sc
     }
     if (InventoryImport.jobs.isNotEmpty()) ImportDialog(InventoryImport.jobs, onClose = { InventoryImport.jobs.clear() })
     val snackbar = remember { SnackbarHostState() }
+    // Плашка про снятое — всегда про последний предмет: прежняя (и ждущая очереди) снимается.
+    val shotBanner = remember { arrayOfNulls<kotlinx.coroutines.Job>(1) }
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
         // Папки могли поменять с компьютера, пока приложение было в фоне: перечитать, а
         // исчезнувшую — сменить ближайшей существующей.
@@ -124,10 +125,18 @@ private fun Body(host: Host, incoming: SnapshotStateList<Picked>, start: List<Sc
                 // Ушли в камеру из списка и ничего не сняли — заведённая под это папка пуста.
                 if (got.count == 0) launch(Dispatchers.IO) { runCatching { Store.pruneEmpty(got.dir) } }
                 if (got.count > 0) {
-                    // Прежняя плашка (прошлый предмет) пережила уход в камеру — убрать: сказать про этот.
+                    // Прежняя плашка (прошлый предмет) — прочь, и та, что ждала очереди, тоже: снимали
+                    // быстро 1–5, а плашка показывала второй, и «Открыть» уводило в него (отзыв
+                    // 15.10.2026: «хочу через уведомление быстро зайти в 5, а там ещё только 2 висит»).
+                    // Без срока плашка с действием висела до нажатия — теперь уходит сама, смахивается,
+                    // с крестиком.
+                    shotBanner[0]?.cancel()
                     snackbar.currentSnackbarData?.dismiss()
-                    val r = snackbar.showSnackbar("${got.dir.name}: +${plural(got.count, "снимок", "снимка", "снимков")}", actionLabel = "Открыть")
-                    if (r == SnackbarResult.ActionPerformed) stack.add(Screen.Browser(got.dir))
+                    shotBanner[0] = launch {
+                        val r = snackbar.showSnackbar("${got.dir.name}: +${plural(got.count, "снимок", "снимка", "снимков")}", actionLabel = "Открыть",
+                            withDismissAction = true, duration = SnackbarDuration.Short)
+                        if (r == SnackbarResult.ActionPerformed) stack.add(Screen.Browser(got.dir))
+                    }
                 }
                 return@launch
             }
@@ -202,16 +211,20 @@ private fun Body(host: Host, incoming: SnapshotStateList<Picked>, start: List<Sc
             // Найденное открывается вместо поиска: «назад» — туда, откуда искали.
             is Screen.Search -> {
                 val place = top.place
+                // Присланное кладётся один раз (см. TreeScreen): второе касание, пока пишутся снимки, клало их дважды.
+                val placed = remember(place) { booleanArrayOf(false) }
                 SearchScreen(here = top.here, initial = top.query.orEmpty(), close = { pop() }, place = place?.size,
                     tree = place?.let { p -> { replaceTop(Screen.Tree(Store.root, place = p)) } },
                     open = { dir ->
                         if (place == null) replaceTop(Screen.Browser(dir))
-                        // Присланные фото — в найденную папку снимками, и открыть её.
-                        else scope.launch {
+                        // Присланные фото — в найденную папку снимками; папка открывается сразу, снимки
+                        // появляются в ней по мере записи (а не через секунды стоящего экрана).
+                        else if (!placed[0]) scope.launch {
+                            placed[0] = true
+                            replaceTop(Screen.Browser(dir))
                             val n = withContext(Dispatchers.IO) {
                                 Store.addPhotos(dir, place.map { Triple(it.name, it.bytes, it.takenMs) }).also { Inventory.refreshReportSoon(dir) }.size
                             }
-                            replaceTop(Screen.Browser(dir))
                             // Куда легло — плашкой с полным путём, надолго (а не короткой подсказкой).
                             snackbar.showSnackbar("${plural(n, "фото", "фото", "фото")} → ${Store.title(dir)}", duration = SnackbarDuration.Long)
                         }
@@ -228,7 +241,7 @@ private fun Body(host: Host, incoming: SnapshotStateList<Picked>, start: List<Sc
         }
         // Над клавиатурой: вернулись из камеры в список — клавиатура уже открыта под следующую бирку.
         val keys = androidx.compose.foundation.layout.WindowInsets.ime.getBottom(androidx.compose.ui.platform.LocalDensity.current) > 0
-        SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).navigationBarsPadding().imePadding().padding(bottom = if (keys) 8.dp else 88.dp))
+        Banners(snackbar, Modifier.align(Alignment.BottomCenter).navigationBarsPadding().imePadding().padding(bottom = if (keys) 8.dp else 88.dp))
     }
 }
 

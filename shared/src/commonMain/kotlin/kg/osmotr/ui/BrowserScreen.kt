@@ -400,6 +400,8 @@ fun BrowserScreen(
                             // «Нерабочее» — только по снимкам: «осмотрено ранее» снимков не даёт.
                             shot = { (card?.status?.photosOf(it) ?: 0) > 0 }, broken = { card?.status?.broken(it) == true }, setBroken = { one, on ->
                             card?.obj?.let { o -> scope.launch { withContext(Dispatchers.IO) { Inventory.setBroken(o, listOf(one), on); Inventory.refreshReportSoon(o) } } }
+                        }, repair = { card?.status?.repair(it) == true }, setRepair = { one, on ->
+                            card?.obj?.let { o -> scope.launch { withContext(Dispatchers.IO) { Inventory.setRepair(o, listOf(one), on); Inventory.refreshReportSoon(o) } } }
                         }, earlier = { card?.status?.earlier(it) == true }, setEarlier = { one, on ->
                             card?.obj?.let { o -> scope.launch { withContext(Dispatchers.IO) { Inventory.setEarlier(o, listOf(one), on); Inventory.refreshReportSoon(o) } } }
                         })
@@ -578,7 +580,8 @@ private class AfterLongPress { var skip = false }
 @Composable
 private fun ItemCard(items: List<Inventory.Item>, similar: List<Inventory.Item>, pick: () -> Unit, add: (List<Inventory.Item>) -> Unit, remove: (Inventory.Item) -> Unit,
                      leaving: List<String>, shot: (Inventory.Item) -> Boolean, broken: (Inventory.Item) -> Boolean, setBroken: (Inventory.Item, Boolean) -> Unit,
-                     earlier: (Inventory.Item) -> Boolean = { false }, setEarlier: (Inventory.Item, Boolean) -> Unit = { _, _ -> }) {
+                     earlier: (Inventory.Item) -> Boolean = { false }, setEarlier: (Inventory.Item, Boolean) -> Unit = { _, _ -> },
+                     repair: (Inventory.Item) -> Boolean = { false }, setRepair: (Inventory.Item, Boolean) -> Unit = { _, _ -> }) {
     // Состав меняется плавно: карточка растёт и сжимается, убранный уезжает, а не пропадает.
     Column(Modifier.fillMaxWidth().testTag("карточка предмета").panel()
         .animateContentSize(motion()).padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -596,10 +599,17 @@ private fun ItemCard(items: List<Inventory.Item>, similar: List<Inventory.Item>,
                     if (i.place.isNotEmpty()) Text(i.place, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.secondary)
                     val cost = listOfNotNull(i.initial?.let { "первонач. ${money(it)}" }, i.sum?.takeIf { it != i.initial }?.let { "сумма ${money(it)}" })
                     if (cost.isNotEmpty()) Text(cost.joinToString(" · "), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    // Нерабочее (на списание) — одним касанием, тут же и снять; только после снимков.
-                    val off = broken(i); val can = shot(i)
+                    // Состояние — одно из двух, одним касанием, тут же и снять; только после снимков.
+                    // «Требуется ремонт» — неисправно сейчас, но не на списание (автор, 15.10.2026).
+                    val off = broken(i); val can = shot(i); val fix = repair(i)
                     val haptic = LocalHapticFeedback.current
-                    FilterChip(off, { haptic.performHapticFeedback(if (off) HapticFeedbackType.ToggleOff else HapticFeedbackType.ToggleOn); setBroken(i, !off) }, {
+                    if (!off) FilterChip(fix, { haptic.performHapticFeedback(if (fix) HapticFeedbackType.ToggleOff else HapticFeedbackType.ToggleOn); setRepair(i, !fix) }, {
+                        Text(when { fix -> "Требуется ремонт"; can -> "Отметить: требуется ремонт"; else -> "Ремонт — сначала снимки" },
+                            color = if (fix) REPAIR_AMBER else Color.Unspecified)
+                    }, Modifier.testTag("чип ремонт").animateContentSize(motion()), enabled = can || fix,
+                        leadingIcon = { Icon(AppIcons.Build, null, Modifier.size(18.dp), tint = if (fix) REPAIR_AMBER else MaterialTheme.colorScheme.onSurfaceVariant) },
+                        colors = FilterChipDefaults.filterChipColors(selectedContainerColor = REPAIR_AMBER.copy(alpha = 0.18f)))
+                    if (!fix) FilterChip(off, { haptic.performHapticFeedback(if (off) HapticFeedbackType.ToggleOff else HapticFeedbackType.ToggleOn); setBroken(i, !off) }, {
                         Text(when { off -> "Нерабочее, на списание"; can -> "Отметить: нерабочее"; else -> "Нерабочее — сначала снимки" },
                             color = if (off) BROKEN_RED else Color.Unspecified)
                     }, Modifier.testTag("чип нерабочее").animateContentSize(motion()), enabled = can || off,

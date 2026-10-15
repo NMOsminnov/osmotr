@@ -123,7 +123,7 @@ object Journal {
         .filter { f -> f.isFile && !f.name.startsWith(".") && isTracked(f.name) }.toList()
 
     private fun isTracked(name: String) = name != FILE && !name.startsWith("Осмотр — ") && (
-        name == Store.NOTE || name == Store.CONTACTS || name == Inventory.MEMBERS || name == Inventory.BROKEN || name == Inventory.EARLIER || name == Inventory.COLUMNS ||
+        name == Store.NOTE || name == Store.CONTACTS || name == Inventory.MEMBERS || name == Inventory.BROKEN || name == Inventory.REPAIR || name == Inventory.EARLIER || name == Inventory.COLUMNS ||
             name.startsWith(Inventory.PREFIX) || name.substringAfterLast('.', "").lowercase() in Store.PHOTO_EXT + "m4a")
 
     /** Отпечаток файла — по памяти, если размер и время не менялись (выгрузка не пересчитывает тысячи снимков). */

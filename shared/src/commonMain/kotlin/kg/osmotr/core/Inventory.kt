@@ -973,9 +973,12 @@ object Inventory {
      */
     class Status(val folder: Map<String, File>, val photos: Map<File, Int>,
                  val first: Map<File, Long> = emptyMap(), val last: Map<File, Long> = emptyMap(),
-                 val brokenKeys: Set<String> = emptySet(), val earlierKeys: Set<String> = emptySet()) {
+                 val brokenKeys: Set<String> = emptySet(), val earlierKeys: Set<String> = emptySet(),
+                 val repairKeys: Set<String> = emptySet()) {
         /** Нерабочее (на списание) — отмечено в «Нерабочие.txt» описи и снято: без снимков отметка не действует. */
         fun broken(i: Item) = photosOf(i) > 0 && key(id(i)) in brokenKeys
+        /** Требуется ремонт — неисправно на момент осмотра, но не на списание («Требуется ремонт.txt»). */
+        fun repair(i: Item) = photosOf(i) > 0 && key(id(i)) in repairKeys && !broken(i)
         fun folderOf(i: Item) = folder[key(id(i))]
         fun photosOf(i: Item) = folderOf(i)?.let { photos[it] } ?: 0
         /** Осмотрено — снято в приложении или отмечено раньше (импорт «Осмотрено ранее.txt»). */
@@ -1005,7 +1008,7 @@ object Inventory {
         }
         visit(obj)
         Folders.saveSoon()
-        return Status(folder, photos, first, last, brokenOf(obj), earlierOf(obj))
+        return Status(folder, photos, first, last, brokenOf(obj), earlierOf(obj), repairOf(obj))
     }
 
     // ---------- Нерабочие ----------
@@ -1026,20 +1029,53 @@ object Inventory {
      * Отметить [items] нерабочими ([on]) или снять отметку; порядок строк в файле — как отмечали.
      * Отмечаются только снятые; сколько отмечено — в ответе.
      */
-    fun setBroken(obj: File, items: List<Item>, on: Boolean): Int {
-        val lines = brokenLines(obj).toMutableList()
+    fun setBroken(obj: File, items: List<Item>, on: Boolean): Int =
+        mark(obj, BROKEN, items, on, "Нерабочее", "Снова рабочее", other = REPAIR, otherOff = "Ремонт не требуется")
+
+    /**
+     * Отметить «Требуется ремонт» или снять (автор, 15.10.2026, со слов осматривающей: «помимо
+     * „нерабочее на списание“ просто „требуется ремонт“ — это как бы и не на списание, его можно
+     * починить, но на момент осмотра неисправно»). Тем же порядком, что «Нерабочее»: только снятое,
+     * файлом «Требуется ремонт.txt» в папке описи; одно из двух — отметка снимает другую.
+     */
+    fun setRepair(obj: File, items: List<Item>, on: Boolean): Int =
+        mark(obj, REPAIR, items, on, "Требуется ремонт", "Ремонт не требуется", other = BROKEN, otherOff = "Снова рабочее")
+
+    private fun mark(obj: File, name: String, items: List<Item>, on: Boolean, onWhat: String, offWhat: String,
+                     other: String, otherOff: String): Int {
+        val lines = markLines(obj, name).toMutableList()
         val st = if (on) status(obj) else null
         // Только снятое в приложении: «осмотрено ранее» (импорт) снимков не даёт — отметить нельзя.
         val take = if (on) items.filter { st!!.photosOf(it) > 0 } else items
         val keys = take.map { key(id(it)) }.toSet()
         lines.removeAll { key(it) in keys }
         if (on) lines += take.map(::id).distinctBy(::key)
-        val f = File(obj, BROKEN)
+        val f = File(obj, name)
         if (lines.isEmpty()) f.delete() else Store.writeDurably(f, (lines.joinToString("\n") + "\n").encodeToByteArray())
-        if (take.isNotEmpty()) Journal.add(obj, if (on) "Нерабочее" else "Снова рабочее", take.joinToString(", ") { id(it) }, f, gone = lines.isEmpty())
+        if (take.isNotEmpty()) Journal.add(obj, if (on) onWhat else offWhat, take.joinToString(", ") { id(it) }, f, gone = lines.isEmpty())
+        // Состояние одно: «на списание» снимает «ремонт» и наоборот.
+        if (on && take.isNotEmpty()) {
+            val rest = markLines(obj, other).toMutableList()
+            val dropped = rest.filter { key(it) in keys }
+            if (dropped.isNotEmpty()) {
+                rest.removeAll { key(it) in keys }
+                val g = File(obj, other)
+                if (rest.isEmpty()) g.delete() else Store.writeDurably(g, (rest.joinToString("\n") + "\n").encodeToByteArray())
+                Journal.add(obj, otherOff, dropped.joinToString(", "), g, gone = rest.isEmpty())
+            }
+        }
         Store.changed()
         return take.size
     }
+
+    private fun markLines(obj: File, name: String): List<String> = File(obj, name).takeIf { it.isFile }
+        ?.readLines()?.map { it.trim() }?.filter { it.isNotEmpty() }.orEmpty()
+
+    // ---------- Требуется ремонт ----------
+
+    const val REPAIR = "Требуется ремонт.txt"
+
+    fun repairOf(obj: File): Set<String> = markLines(obj, REPAIR).map(::key).toSet()
 
     // ---------- Осмотрено ранее ----------
     //
@@ -1326,7 +1362,7 @@ object Inventory {
                 Col("Приоритет", 10, hasPriority) { i -> i.priority.toLongOrNull() ?: i.priority.ifEmpty { null } },
                 Col("Список", 18, hasStatus) { i -> i.status.ifEmpty { null } },
                 Col("Осмотрено", 11, true) { i -> if (st.inspected(i)) "Да" else "Нет" },
-                Col("Состояние", 13, true) { i -> if (st.broken(i)) "Нерабочее" else null },
+                Col("Состояние", 17, true) { i -> when { st.broken(i) -> "Нерабочее"; st.repair(i) -> "Требуется ремонт"; else -> null } },
                 Col("Снимков", 9, true) { i -> st.photosOf(i) },
                 Col("Первый снимок", 17, true) { i -> st.folderOf(i)?.let(::shotsOf)?.firstOrNull()?.let { WHEN.format(it) } },
                 Col("Последний снимок", 17, true) { i -> st.folderOf(i)?.let(::shotsOf)?.lastOrNull()?.let { WHEN.format(it) } },
@@ -1337,12 +1373,12 @@ object Inventory {
             val head = cols.map { it.title }
             val sheets = mutableListOf<Xlsx.Out>()
             val total = listOfNotNull("Всего", "Осмотрено", "Не осмотрено", "Осмотрено, %",
-                "Первонач. стоимость осмотренного".takeIf { hasInitial }, "Нерабочих")
+                "Первонач. стоимость осмотренного".takeIf { hasInitial }, "Нерабочих", "Требуют ремонта")
             fun line(name: String, items: List<Item>): List<Any?> {
                 val done = items.filter(st::inspected)
                 return listOf(name, items.size, done.size, items.size - done.size,
                     if (items.isEmpty()) 0 else kotlin.math.round(done.size * 1000.0 / items.size) / 10.0) +
-                    (if (hasInitial) listOf(done.sumOf { it.initial ?: 0.0 }) else emptyList()) + listOf(items.count(st::broken))
+                    (if (hasInitial) listOf(done.sumOf { it.initial ?: 0.0 }) else emptyList()) + listOf(items.count(st::broken), items.count(st::repair))
             }
             val summary = mutableListOf<List<Any?>>(listOf("Лист") + total)
             for (l in lists) {
@@ -1350,8 +1386,9 @@ object Inventory {
                 summary += line(l, items)
                 val rows = listOf<List<Any?>>(head) + items.map { i -> cols.map { it.value(i) } }
                 sheets += Xlsx.Out(l, rows, cols.map { it.width }) { r ->
-                    // Нерабочий — красным (важнее, чем «осмотрен»), осмотренный — зелёным.
-                    when { r == 0 -> Xlsx.PLAIN; st.broken(items[r - 1]) -> Xlsx.RED; st.inspected(items[r - 1]) -> Xlsx.GREEN; else -> Xlsx.PLAIN }
+                    // Нерабочий — красным, требующий ремонта — жёлтым (важнее, чем «осмотрен»), осмотренный — зелёным.
+                    when { r == 0 -> Xlsx.PLAIN; st.broken(items[r - 1]) -> Xlsx.RED; st.repair(items[r - 1]) -> Xlsx.AMBER
+                        st.inspected(items[r - 1]) -> Xlsx.GREEN; else -> Xlsx.PLAIN }
                 }
             }
             if (lists.size > 1) summary += line("Все листы", p.items)
@@ -1389,21 +1426,23 @@ object Inventory {
             val notesByDay = perDay("Комментарий") { listOf(it.file) }
             val peopleByDay = perDay("Контакты") { listOf(it.file) }
             val brokenByDay = perDay("Нерабочее") { e -> e.subject.split(", ").map(::key) }
+            val repairByDay = perDay("Требуется ремонт") { e -> e.subject.split(", ").map(::key) }
             val voiceByDay = Store.voiceTree(obj).groupBy { DAY.format(timeOf(it)) }.mapValues { it.value.size }
             val firstOf = (itemsByDay.mapValues { (_, ks) -> ks.minOf { day.getValue(it) } }.entries + photosByDay.mapValues { it.value.min() }.entries)
                 .groupBy({ it.key }, { it.value }).mapValues { it.value.min() }.toMutableMap()
             // Дни, когда только писали и записывали, — тоже строкой (время — по журналу).
-            for (e in log) if (e.what in setOf("Комментарий", "Контакты", "Нерабочее", "Голосовая заметка")) DAY.format(e.t).let { d -> firstOf[d] = minOf(firstOf[d] ?: e.t, e.t) }
+            for (e in log) if (e.what in setOf("Комментарий", "Контакты", "Нерабочее", "Требуется ремонт", "Голосовая заметка")) DAY.format(e.t).let { d -> firstOf[d] = minOf(firstOf[d] ?: e.t, e.t) }
             var sum = imported
             val days = listOf<List<Any?>>(listOf("День", "Осмотрено впервые", "из них по снимкам", "отмечено без снимков", "Снимков сделано",
-                "Всего осмотрено к концу дня", "Комментарии (папок)", "Голосовые", "Контакты (папок)", "Отмечено нерабочими")) +
+                "Всего осмотрено к концу дня", "Комментарии (папок)", "Голосовые", "Контакты (папок)", "Отмечено нерабочими",
+                "Отмечено «требуется ремонт»")) +
                 (if (imported > 0) listOf(listOf<Any?>("до приложения (импорт)", imported, 0, imported, 0, imported)) else emptyList()) +
                 firstOf.entries.sortedBy { it.value }.map { (d, _) ->
                     val ks = itemsByDay[d].orEmpty()
                     val photo = ks.count { it in viaPhotos }
                     sum += ks.size
                     listOf(d, ks.size, photo, ks.size - photo, photosByDay[d]?.size ?: 0, sum,
-                        notesByDay[d] ?: 0, voiceByDay[d] ?: 0, peopleByDay[d] ?: 0, brokenByDay[d] ?: 0)
+                        notesByDay[d] ?: 0, voiceByDay[d] ?: 0, peopleByDay[d] ?: 0, brokenByDay[d] ?: 0, repairByDay[d] ?: 0)
                 }
             // Нет в описи — папки со снимками, которых в описи нет (излишки, неизвестное).
             val keys = p.items.map { key(id(it)) }.toSet()

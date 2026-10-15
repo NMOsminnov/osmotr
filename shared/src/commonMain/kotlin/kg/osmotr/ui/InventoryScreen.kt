@@ -532,6 +532,8 @@ fun InventoryScreen(obj: File, into: File? = null, initialQuery: String? = null,
                                         // Метки — проявляются и уходят, а не возникают за кадр (матрица движения: РЫВОК).
                                         AnimatedVisibility(st?.broken(i) == true, enter = fadeIn(motion()) + expandHorizontally(motion()),
                                             exit = fadeOut(motion()) + shrinkHorizontally(motion())) { BrokenLabel() }
+                                        AnimatedVisibility(st?.repair(i) == true, enter = fadeIn(motion()) + expandHorizontally(motion()),
+                                            exit = fadeOut(motion()) + shrinkHorizontally(motion())) { RepairLabel() }
                                         AnimatedVisibility(st?.earlier(i) == true, enter = fadeIn(motion()) + expandHorizontally(motion()),
                                             exit = fadeOut(motion()) + shrinkHorizontally(motion())) { EarlierLabel() }
                                     }
@@ -746,6 +748,11 @@ fun EarlierLabel() = Text("осмотрено", Modifier.testTag("метка о�
 @Composable
 fun BrokenLabel() = Text("нерабочее", Modifier.testTag("метка нерабочее").clip(RoundedCornerShape(6.dp)).background(BROKEN_RED.copy(alpha = 0.2f)).padding(horizontal = 6.dp),
     style = MaterialTheme.typography.labelSmall, color = BROKEN_RED, maxLines = 1)
+
+/** «Требуется ремонт» — жёлтой меткой рядом с номером, как «нерабочее». */
+@Composable
+fun RepairLabel() = Text("ремонт", Modifier.testTag("метка ремонт").clip(RoundedCornerShape(6.dp)).background(REPAIR_AMBER.copy(alpha = 0.2f)).padding(horizontal = 6.dp),
+    style = MaterialTheme.typography.labelSmall, color = REPAIR_AMBER, maxLines = 1)
 
 
 /** Сняли из списка описи: в эту папку — по возвращении остаться в списке и сказать, что легло. */

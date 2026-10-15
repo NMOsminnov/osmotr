@@ -37,6 +37,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import kotlinx.coroutines.launch
 
 /**
@@ -67,7 +68,7 @@ fun TreeScreen(current: File, open: (File) -> Unit, close: () -> Unit, place: Li
         }
     }
     Scaffold(
-        snackbarHost = { SnackbarHost(snackbar) },
+        snackbarHost = { Banners(snackbar) },
         topBar = {
             if (selected.isNotEmpty()) TopAppBar(
                 navigationIcon = { IconButton(onClick = { selected.clear() }) { Icon(Icons.Default.Close, "Снять выбор") } },
@@ -83,16 +84,37 @@ fun TreeScreen(current: File, open: (File) -> Unit, close: () -> Unit, place: Li
             )
         },
     ) { inner ->
-        // Присланные фото: касание папки — положить туда снимками и открыть её.
-        val pick: (File) -> Unit = if (place == null) open else { dir ->
-            if (dir == Store.root) host.toast("Выберите папку — в «Осмотры» напрямую фото не кладутся")
-            else scope.launch {
-                val n = withContext(Dispatchers.IO) {
-                    Store.addPhotos(dir, place.map { Triple(it.name, it.bytes, it.takenMs) }).also { Inventory.refreshReportSoon(dir) }.size
-                }
-                host.toast("Добавлено в «${dir.name}»: ${plural(n, "фото", "фото", "фото")}")
-                open(dir)
-            }
+        // Присланные фото: касание папки — окно «сюда / новая папка по инвентарнику или названию»,
+        // затем — куда ляжет полным путём и «Положить». Кладётся один раз: повторное касание, пока
+        // пишутся снимки (по нескольку мегабайт), раньше клало их второй раз (отзыв 15.10.2026: «они
+        // дублируются, типа дважды»).
+        var target by remember { mutableStateOf<File?>(null) }
+        var confirm by remember { mutableStateOf<Pair<String, suspend () -> File?>?>(null) }
+        var placing by remember { mutableStateOf(false) }
+        val pick: (File) -> Unit = if (place == null) open else { dir -> if (!placing) target = dir }
+        target?.let { dir ->
+            PlaceInFolderDialog(dir, place!!.size, place = { where, resolve -> target = null; confirm = where to resolve }, dismiss = { target = null })
+        }
+        confirm?.let { (where, resolve) ->
+            androidx.compose.material3.AlertDialog(
+                onDismissRequest = { confirm = null },
+                title = { Text("Положить ${plural(place!!.size, "фото", "фото", "фото")} сюда?") },
+                text = { Text(where, style = androidx.compose.material3.MaterialTheme.typography.bodyLarge) },
+                confirmButton = { androidx.compose.material3.TextButton(onClick = {
+                    confirm = null
+                    if (placing) return@TextButton
+                    placing = true
+                    scope.launch {
+                        val dir = resolve() ?: run { placing = false; return@launch }
+                        open(dir)
+                        val n = withContext(Dispatchers.IO) {
+                            Store.addPhotos(dir, place!!.map { Triple(it.name, it.bytes, it.takenMs) }).also { Inventory.refreshReportSoon(dir) }.size
+                        }
+                        host.toast("Добавлено в «${dir.name}»: ${plural(n, "фото", "фото", "фото")}")
+                    }
+                }, modifier = Modifier.testTag("положить")) { Text("Положить") } },
+                dismissButton = { androidx.compose.material3.TextButton(onClick = { confirm = null }) { Text("Назад") } },
+            )
         }
         FolderTree(current = current, onPick = pick, allOpen = allOpen, onMove = if (place == null) move else null, selected = selected,
             modifier = Modifier.fillMaxSize().padding(inner))

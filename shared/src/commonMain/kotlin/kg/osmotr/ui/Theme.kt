@@ -60,17 +60,20 @@ fun OsmotrTheme(dark: Boolean = isSystemInDarkTheme(), content: @Composable () -
         secondaryContainer = Color(0xFFE6EBF1), onSecondaryContainer = Color(0xFF1F2328),
         outline = Color(0xFFD0D7DE), outlineVariant = Color(0xFFE1E6EB), error = Color(0xFFCF222E),
     )
-    // «Осмотрено» и «нерабочее» — свои оттенки на каждую тему: текст не ниже 4,5:1 к фону.
-    val tones = if (dark) Tones(done = Color(0xFF3FB950), broken = Color(0xFFF85149)) else Tones(done = Color(0xFF1A7F37), broken = Color(0xFFCF222E))
+    // «Осмотрено», «нерабочее», «требуется ремонт» — свои оттенки на каждую тему: текст не ниже 4,5:1 к фону.
+    val tones = if (dark) Tones(done = Color(0xFF3FB950), broken = Color(0xFFF85149), repair = Color(0xFFD29922))
+        else Tones(done = Color(0xFF1A7F37), broken = Color(0xFFCF222E), repair = Color(0xFF9A6700))
     CompositionLocalProvider(LocalTones provides tones) {
         MaterialTheme(colorScheme = colors, typography = type, content = content)
     }
 }
 
-class Tones(val done: Color, val broken: Color)
-private val LocalTones = staticCompositionLocalOf { Tones(Color(0xFF3FB950), Color(0xFFF85149)) }
+class Tones(val done: Color, val broken: Color, val repair: Color)
+private val LocalTones = staticCompositionLocalOf { Tones(Color(0xFF3FB950), Color(0xFFF85149), Color(0xFFD29922)) }
 
 /** Зелёный «осмотрено» — один на всё приложение, под тему. */
 val DONE_GREEN: Color @Composable @ReadOnlyComposable get() = LocalTones.current.done
 /** Красный «нерабочее» — в описи, в папке предмета и на кнопках, под тему. */
 val BROKEN_RED: Color @Composable @ReadOnlyComposable get() = LocalTones.current.broken
+/** Жёлтый «требуется ремонт» — неисправно, но не на списание. */
+val REPAIR_AMBER: Color @Composable @ReadOnlyComposable get() = LocalTones.current.repair

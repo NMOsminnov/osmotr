@@ -15,8 +15,8 @@ android {
         applicationId = "kg.osmotr"
         minSdk = 26
         targetSdk = 37
-        versionCode = 14
-        versionName = "3.7"
+        versionCode = 15
+        versionName = "3.8"
     }
 
     signingConfigs {
