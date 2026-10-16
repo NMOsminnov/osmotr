@@ -13,7 +13,7 @@ targets:
       path: iosApp/Info.plist
       properties:
         CFBundleDisplayName: Осмотр
-        CFBundleShortVersionString: "3.7"
+        CFBundleShortVersionString: "3.8"
         CFBundleVersion: "14"
         UILaunchScreen:
           UIColorName: LaunchBackground
@@ -45,8 +45,8 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: kg.osmotr.app
-        MARKETING_VERSION: "3.7"
-        CURRENT_PROJECT_VERSION: "14"
+        MARKETING_VERSION: "3.8"
+        CURRENT_PROJECT_VERSION: "15"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         CODE_SIGNING_ALLOWED: "NO"
         CODE_SIGNING_REQUIRED: "NO"
@@ -73,7 +73,7 @@ targets:
       path: iosShare/Info.plist
       properties:
         CFBundleDisplayName: Осмотр
-        CFBundleShortVersionString: "3.7"
+        CFBundleShortVersionString: "3.8"
         CFBundleVersion: "14"
         NSExtension:
           NSExtensionPointIdentifier: com.apple.share-services
@@ -84,7 +84,7 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: kg.osmotr.app.share
-        MARKETING_VERSION: "3.7"
-        CURRENT_PROJECT_VERSION: "14"
+        MARKETING_VERSION: "3.8"
+        CURRENT_PROJECT_VERSION: "15"
         CODE_SIGNING_ALLOWED: "NO"
         CODE_SIGNING_REQUIRED: "NO"
