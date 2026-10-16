@@ -14,7 +14,7 @@ targets:
       properties:
         CFBundleDisplayName: Осмотр
         CFBundleShortVersionString: "3.8"
-        CFBundleVersion: "14"
+        CFBundleVersion: "15"
         UILaunchScreen:
           UIColorName: LaunchBackground
         # «Открыть в «Осмотр»» и «Поделиться» из WhatsApp, «Файлов», почты: опись Excel.
@@ -74,7 +74,7 @@ targets:
       properties:
         CFBundleDisplayName: Осмотр
         CFBundleShortVersionString: "3.8"
-        CFBundleVersion: "14"
+        CFBundleVersion: "15"
         NSExtension:
           NSExtensionPointIdentifier: com.apple.share-services
           NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).ShareViewController
